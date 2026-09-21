@@ -1,0 +1,16 @@
+<GridTransmission>
+    <AssetMetadataCode>MTR-2026-99A</AssetMetadataCode>
+    <OperationalZone>NORTH-UTILITY-GRID</OperationalZone>
+    <IntervalReadings>
+        <Reading>
+            <TimePoint>2026-07-28T09:00:00Z</TimePoint>
+            <KwhValue>12.45</KwhValue>
+            <VoltageCheck>230.5</VoltageCheck>
+        </Reading>
+        <Reading>
+            <TimePoint>2026-07-28T09:15:00Z</TimePoint>
+            <KwhValue>14.20</KwhValue>
+            <VoltageCheck>228.1</VoltageCheck>
+        </Reading>
+    </IntervalReadings>
+</GridTransmission>

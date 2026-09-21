@@ -1,0 +1,35 @@
+# .gitignore
+.env
+.env.*
+!.env.sample
+.env.local
+.env.*.local
+.gitleaks.toml
+infra/.env
+infra/.env.*
+!infra/.env.sample
+**/target/
+**/.pytest_cache/
+**/__pycache__/
+*.db
+.vscode/
+*.zip
+*.pdf
+# misc folder has documents for internal use only, not part of the project
+misc
+*.pem
+eai-project-key
+
+# NEW — Terraform state/caches. .terraform/ is regeneratable via `terraform init`;
+# *.tfstate can contain plaintext resource attributes — Terraform Cloud already
+# holds the real state remotely, so nothing of value is lost by ignoring local copies.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.sample
+
+*.class
+*.jar

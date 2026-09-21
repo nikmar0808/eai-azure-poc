@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "eai-project-literals"
+description = "Known project literals that must never be committed"
+regex = '''<SECURE_KEY>|<PASSWORD>|<YOUR VALUES>|<CANARY STRINGS FOR TESTING>'''

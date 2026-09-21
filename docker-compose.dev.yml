@@ -1,0 +1,65 @@
+networks:
+  eai-mesh:
+    driver: bridge
+    name: eai-mesh
+
+volumes:
+  postgres_persistent_engine_data:
+    driver: local
+
+services:
+  # Node 1: Relational Enterprise Storage Tier
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: postgres-db
+    restart: always
+    command: postgres -c log_timezone=Asia/Kolkata -c timezone=Asia/Kolkata
+    environment:
+      - POSTGRES_USER=smart_meter_admin
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set in .env}
+      - POSTGRES_DB=smart_meter_warehouse
+      - TZ=Asia/Kolkata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_persistent_engine_data:/var/lib/postgresql/data
+    networks:
+      - eai-mesh
+    # NEW — fixes the gap architecture.md Section 6.2.1 already flagged: without 
+    # this, `depends_on` only waits for the container to start, not for Postgres 
+    # to finish initializing and accept connections.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smart_meter_admin -d smart_meter_warehouse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  
+  # Node 2: High-Speed Validation API Tier
+  python-validator:
+    build: { context: ./02-python-transformation-api, dockerfile: Dockerfile }
+    container_name: python-validator
+    restart: always
+    environment:
+      - API_SECURITY_TOKEN=${API_SECURITY_TOKEN:?set in .env}
+      - DATABASE_URL=postgresql+psycopg://smart_meter_admin:${POSTGRES_PASSWORD:?set in .env}@postgres-db:5432/smart_meter_warehouse
+      - TZ=Asia/Kolkata
+    ports: ["8082:8082"]    # fine to keep exposed for LOCAL dev/testing — this is the dev compose file only
+    depends_on:
+      postgres-db: { condition: service_healthy }
+    networks: [eai-mesh]
+
+  # Node 3: Enterprise Gateway Ingress Orchestrator
+  java-gateway:
+    build: { context: ./01-java-ingestion-service, dockerfile: Dockerfile }
+    container_name: java-gateway
+    restart: always
+    environment:
+      - SERVER_PORT=8081
+      # Remap destination URL target dynamically to use internal Docker DNS naming!
+      - INTEGRATION_PYTHON_BASE-URL=http://python-validator:8082
+      - INTEGRATION_PYTHON_AUTH-${API_SECURITY_TOKEN:?set in .env}
+      - TZ=Asia/Kolkata
+      - JAVA_OPTS=-Duser.timezone=Asia/Kolkata
+    ports: ["8081:8081"]
+    depends_on: [python-validator]
+    networks: [eai-mesh]

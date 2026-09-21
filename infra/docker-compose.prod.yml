@@ -1,0 +1,24 @@
+networks:
+  eai-mesh:
+    driver: bridge
+services:
+  python-validator:
+    image: ${ACR_REGISTRY}/eai-python-validator:${IMAGE_TAG}
+    restart: always
+    environment:
+      - API_SECURITY_TOKEN=${API_SECURITY_TOKEN}
+      - DATABASE_URL=${DATABASE_URL}
+      - TZ=Asia/Kolkata
+    networks: [eai-mesh]
+  java-gateway:
+    image: ${ACR_REGISTRY}/eai-java-gateway:${IMAGE_TAG}
+    restart: always
+    environment:
+      - SERVER_PORT=8081
+      - INTEGRATION_PYTHON_BASE-URL=http://python-validator:8082
+      - INTEGRATION_PYTHON_AUTH-TOKEN=${API_SECURITY_TOKEN}
+      - TZ=Asia/Kolkata
+      - JAVA_OPTS=-Duser.timezone=Asia/Kolkata
+    ports: ["8081:8081"]
+    depends_on: [python-validator]
+    networks: [eai-mesh]
