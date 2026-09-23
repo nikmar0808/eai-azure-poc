@@ -117,6 +117,9 @@ Items tracked ahead of treating this implementation as complete:
 
 ## Documentation
 
-- [`ARCHITECTURE_AZURE.md`](docs/ARCHITECTURE_AZURE.md) — design principles, architecture decisions, and the identity/security model
+- [`ARCHITECTURE_AZURE.md`](docs/ARCHITECTURE_AZURE.md) — architecture decisions, design principles, and the identity/security model
+- [`ADR001`](docs/adr/ADR-001-fresh-history-copies.md), [`ADR002`](docs/adr/ADR-002-branching-model.md), [`ADR003`](docs/Aadr/DR-003-repository-visibility.md) - ADRs
+- [`CONTEXT DIAGRAM`](docs/architecture/c4-container.md) - Context Diagram
+- [`CONATAINER DIAGRAM`](docs/architecture/c4-container.md) - Container Digram
 - [`DEPLOYMENT_AZURE.md`](docs/DEPLOYMENT_AZURE.md) — instructions to deploy the project to an independent Azure subscription
 - [`INFRA_VIEW_AZURE.md`](docs/INFRA_VIEW_AZURE.md) — infrastructure inventory and relationships
