@@ -8,14 +8,16 @@ terraform {
 
 provider "azuread" {}
 
-# Passing subscription_id and tenant_id explicitly is required for the bootstrap workspace
-# because it does not have a resource group yet, so the provider cannot infer them from a resource group.
-# The other workspaces can omit these values because they have a resource group and the provider can infer them from that.
-provider "azurerm" {
-  features {}
-  subscription_id = var.azure_subscription_id
-  tenant_id       = var.azure_tenant_id
-}
+# # Passing subscription_id and tenant_id explicitly is required for the bootstrap workspace
+# # because it does not have a resource group yet, so the provider cannot infer them from a resource group.
+# # The other workspaces can omit these values because they have a resource group and the provider can infer them from that.
+# # Commented out because the bootstrap workspace is now using a resource group in the shared workspace,
+# # so the provider can infer subscription_id and tenant_id from that resource group.
+# provider "azurerm" {
+#   features {}
+#   subscription_id = var.azure_subscription_id
+#   tenant_id       = var.azure_tenant_id
+# }
 
 # --- GitHub Actions deployment identities ---
 # THREE separate Entra applications — one per environment — not one
@@ -30,7 +32,7 @@ provider "azurerm" {
 # uses a single gha-deploy-role.)
 
 resource "azuread_application" "gha_deploy_dev" {
-  display_name = "gha-deploy-dev-identity"
+  display_name = "gha-deploy-dev-identity-poc"
 }
 resource "azuread_service_principal" "gha_deploy_dev" {
   client_id = azuread_application.gha_deploy_dev.client_id
@@ -61,7 +63,7 @@ resource "azuread_application_federated_identity_credential" "gha_deploy_dev" {
 }
 
 resource "azuread_application" "gha_deploy_uat" {
-  display_name = "gha-deploy-uat-identity"
+  display_name = "gha-deploy-uat-identity-poc"
 }
 resource "azuread_service_principal" "gha_deploy_uat" {
   client_id = azuread_application.gha_deploy_uat.client_id
@@ -78,7 +80,7 @@ resource "azuread_application_federated_identity_credential" "gha_deploy_uat" {
 }
 
 resource "azuread_application" "gha_deploy_prod" {
-  display_name = "gha-deploy-prod-identity"
+  display_name = "gha-deploy-prod-identity-poc"
 }
 resource "azuread_service_principal" "gha_deploy_prod" {
   client_id = azuread_application.gha_deploy_prod.client_id
@@ -98,7 +100,7 @@ resource "azuread_application_federated_identity_credential" "gha_deploy_prod" {
 # Local execution mode, because HCP Terraform never itself runs plan or apply.
 
 resource "azuread_application" "tfc_run_dev" {
-  display_name = "tfc-run-identity"
+  display_name = "tfc-run-dev-identity-poc"
 }
 
 resource "azuread_service_principal" "tfc_run_dev" {
@@ -115,7 +117,7 @@ resource "azuread_application_federated_identity_credential" "tfc_run_dev" {
 }
 
 resource "azuread_application" "tfc_run_uat" {
-  display_name = "tfc-run-identity"
+  display_name = "tfc-run-uat-identity-poc"
 }
 
 resource "azuread_service_principal" "tfc_run_uat" {
@@ -132,7 +134,7 @@ resource "azuread_application_federated_identity_credential" "tfc_run_uat" {
 }
 
 resource "azuread_application" "tfc_run_prod" {
-  display_name = "tfc-run-identity"
+  display_name = "tfc-run-prod-identity-poc"
 }
 
 resource "azuread_service_principal" "tfc_run_prod" {

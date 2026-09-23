@@ -139,248 +139,7 @@ foreach ($ns in $providers) { Write-Output "$ns`: $(az provider show --namespace
 
 A one-time, locally-applied, separate-state Terraform root creates only the Entra applications, service principals, and federated identity credentials described in `ARCHITECTURE_AZURE.md` Appendix A — no application infrastructure. This resolves the same circularity a remote Terraform run would otherwise face: an identity cannot be used to authenticate the very Terraform run that creates it.
 
-**Refer to file:** `infra/bootstrap/terraform.tfvars.sample`
-
-**File to modify:** `infra/bootstrap/variables.tf`.
-
-```hcl
-variable "azure_tenant_id" {
-  type      = string
-  sensitive = true
-}
-
-variable "azure_subscription_id" {
-  type      = string
-  sensitive = true
-}
-
-variable "github_org" {
-  type = string
-}
-
-variable "github_owner_id" {
-  type = string
-}
-
-variable "repo_name" {
-  type = string
-}
-
-variable "github_repo_id" {
-  type = string
-}
-
-variable "hcp_terraform_org" {
-  type = string
-}
-
-variable "hcp_terraform_ws_shared" {
-  type = string
-}
-
-variable "hcp_terraform_ws_dev" {
-  type = string
-}
-
-variable "hcp_terraform_ws_uat" {
-  type = string
-}
-
-variable "hcp_terraform_ws_prod" {
-  type = string
-}
-
-variable "gha_deploy_client_id" {
-  type      = string
-  sensitive = true
-}
-
-variable "acr_name" {
-  type = string
-}
-
-variable "key_vault_name" {
-  type = string
-}
-
-variable "postgres_server_name" {
-  type = string
-}
-
-variable "apim_name" {
-  type = string
-}
-
-variable "operator_ip_cidr" {
-  type        = string
-  description = "Operator's public IP, as a /32 CIDR, permitted to reach the VM's SSH port directly."
-}
-```
-
-**File to modify:** `infra/bootstrap/main.tf`.
-
-```hcl
-terraform {
-  required_providers {
-    azuread = { source = "hashicorp/azuread", version = "~> 3.0" }
-    azurerm = { source = "hashicorp/azurerm", version = "~> 4.0" }
-  }
-  required_version = ">= 1.5.0"
-}
-
-provider "azuread" {}
-
-# Passing subscription_id and tenant_id explicitly is required for the bootstrap workspace
-# because it does not have a resource group yet, so the provider cannot infer them from a resource group.
-# The other workspaces can omit these values because they have a resource group and the provider can infer them from that.
-provider "azurerm" {
-  features {}
-  subscription_id = var.azure_subscription_id
-  tenant_id       = var.azure_tenant_id
-}
-
-# --- GitHub Actions deployment identities ---
-# THREE separate Entra applications — one per environment — not one
-# application with three federated credentials. RBAC in Entra is scoped to
-# the service principal, not to which federated credential authenticated
-# it; a single shared application would mean any RBAC grant made to it
-# (see each environment's identity.tf) is usable regardless of which
-# environment's GitHub context obtained the token, defeating the
-# per-environment isolation required by ARCHITECTURE_AZURE.md, Design
-# Principle 4: a separate principal per environment, not a separate trust
-# condition on one shared principal. (The AWS implementation, by contrast,
-# uses a single gha-deploy-role.)
-
-resource "azuread_application" "gha_deploy_dev" {
-  display_name = "gha-deploy-dev-identity"
-}
-resource "azuread_service_principal" "gha_deploy_dev" {
-  client_id = azuread_application.gha_deploy_dev.client_id
-}
-resource "azuread_application_federated_identity_credential" "gha_deploy_dev_ref" {
-  application_id = azuread_application.gha_deploy_dev.id
-  display_name   = "github-actions-dev-ref"
-  description    = "GitHub Actions OIDC — dev build/push jobs (no environment: key, push-triggered on develop)"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}@${var.github_owner_id}/${var.repo_name}@${var.github_repo_id}:ref:refs/heads/develop"
-}
-
-# A second, separate credential — Entra federated credentials match exactly
-# one subject each (unlike AWS IAM's StringLike, which accepts an array).
-# The docker-build-push jobs (no `environment:` key) receive a
-# ref:refs/heads/BRANCH-shaped claim and authenticate via the credential
-# above; the deploy-dev job declares `environment: dev` and receives an
-# environment:NAME-shaped claim instead, regardless of branch — it needs
-# this second credential or it fails OIDC even though the build jobs work.
-resource "azuread_application_federated_identity_credential" "gha_deploy_dev" {
-  application_id = azuread_application.gha_deploy_dev.id
-  display_name   = "github-actions-dev-environment"
-  description    = "GitHub Actions OIDC — deploy-dev job (declares environment: dev)"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}@${var.github_owner_id}/${var.repo_name}@${var.github_repo_id}:environment:dev"
-}
-
-resource "azuread_application" "gha_deploy_uat" {
-  display_name = "gha-deploy-uat-identity"
-}
-resource "azuread_service_principal" "gha_deploy_uat" {
-  client_id = azuread_application.gha_deploy_uat.client_id
-}
-resource "azuread_application_federated_identity_credential" "gha_deploy_uat" {
-  application_id = azuread_application.gha_deploy_uat.id
-  display_name   = "github-actions-uat"
-  description    = "GitHub Actions OIDC — uat environment deployments"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  # A workflow_dispatch-triggered job declaring `environment: uat` receives
-  # this claim shape, not a ref:refs/heads/BRANCH shape.
-  subject        = "repo:${var.github_org}@${var.github_owner_id}/${var.repo_name}@${var.github_repo_id}:environment:uat"
-}
-
-resource "azuread_application" "gha_deploy_prod" {
-  display_name = "gha-deploy-prod-identity"
-}
-resource "azuread_service_principal" "gha_deploy_prod" {
-  client_id = azuread_application.gha_deploy_prod.client_id
-}
-resource "azuread_application_federated_identity_credential" "gha_deploy_prod" {
-  application_id = azuread_application.gha_deploy_prod.id
-  display_name   = "github-actions-prod"
-  description    = "GitHub Actions OIDC — prod environment deployments"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:${var.github_org}@${var.github_owner_id}/${var.repo_name}@${var.github_repo_id}:environment:prod"
-}
-
-# --- HCP Terraform identities ---
-# Three separate Entra applications, one per workspace (dev, uat, prod), each
-# trusting only its own workspace. No RBAC is granted to any of them under
-# Local execution mode, because HCP Terraform never itself runs plan or apply.
-
-resource "azuread_application" "tfc_run_dev" {
-  display_name = "tfc-run-identity"
-}
-
-resource "azuread_service_principal" "tfc_run_dev" {
-  client_id = azuread_application.tfc_run_dev.client_id
-}
-
-resource "azuread_application_federated_identity_credential" "tfc_run_dev" {
-  application_id = azuread_application.tfc_run_dev.id
-  display_name   = "hcp-terraform-workload-identity"
-  description    = "HCP Terraform OIDC — plan/apply runs for the dev workspace"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://app.terraform.io"
-  subject        = "organization:${var.hcp_terraform_org}:project:*:workspace:${var.hcp_terraform_ws_dev}:run_phase:*"
-}
-
-resource "azuread_application" "tfc_run_uat" {
-  display_name = "tfc-run-identity"
-}
-
-resource "azuread_service_principal" "tfc_run_uat" {
-  client_id = azuread_application.tfc_run_uat.client_id
-}
-
-resource "azuread_application_federated_identity_credential" "tfc_run_uat" {
-  application_id = azuread_application.tfc_run_uat.id
-  display_name   = "hcp-terraform-workload-identity"
-  description    = "HCP Terraform OIDC — plan/apply runs for the uat workspace"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://app.terraform.io"
-  subject        = "organization:${var.hcp_terraform_org}:project:*:workspace:${var.hcp_terraform_ws_uat}:run_phase:*"
-}
-
-resource "azuread_application" "tfc_run_prod" {
-  display_name = "tfc-run-identity"
-}
-
-resource "azuread_service_principal" "tfc_run_prod" {
-  client_id = azuread_application.tfc_run_prod.client_id
-}
-
-resource "azuread_application_federated_identity_credential" "tfc_run_prod" {
-  application_id = azuread_application.tfc_run_prod.id
-  display_name   = "hcp-terraform-workload-identity"
-  description    = "HCP Terraform OIDC — plan/apply runs for the prod workspace"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://app.terraform.io"
-  subject        = "organization:${var.hcp_terraform_org}:project:*:workspace:${var.hcp_terraform_ws_prod}:run_phase:*"
-}
-
-# No RBAC role assignments are created here — that happens once each
-# environment's resource group exists (in each environment's identity.tf), which is exactly the
-# circularity this bootstrap step exists to break.
-
-output "gha_deploy_dev_client_id"  { value = azuread_application.gha_deploy_dev.client_id }
-output "gha_deploy_uat_client_id"  { value = azuread_application.gha_deploy_uat.client_id }
-output "gha_deploy_prod_client_id" { value = azuread_application.gha_deploy_prod.client_id }
-output "tfc_run_dev_client_id"         { value = azuread_application.tfc_run_dev.client_id }
-output "tfc_run_uat_client_id"         { value = azuread_application.tfc_run_uat.client_id }
-output "tfc_run_prod_client_id"         { value = azuread_application.tfc_run_prod.client_id }
-```
+**File to modify:** `infra/bootstrap/terraform.tfvars.sample` - rename by removing ".sample" from name and change contents
 
 **Apply:**
 
@@ -438,19 +197,10 @@ A DNS resolution failure (`NXDOMAIN` / no output) for the PostgreSQL and API Man
 
 ### 1.5.2 Shared Container Registry
 Applied against workspace `<HCP_TERRAFORM_WORKSPACE_SHARED>`.
-**File to modify:** `infra/shared/terraform.tfvars.sample` - rename by removing ".sample" from name
 
-**Referred file:** `infra/shared/variables.tf`
+**File to modify:** `infra/shared/terraform.tfvars.sample` - rename by removing ".sample" from name and change contents
 
-**Referring files:**
-
-**With no modifications:**
-`infra/shared/main.tf` 
-`infra/shared/acr.tf`
-`infra/shared/resource-group.tf`
-
-**With modifications:**
-None
+**Apply**
 
 ```bash
 # bash — run from: <repo-root>/infra/shared
@@ -473,13 +223,9 @@ terraform apply
 
 Applied against workspace `<HCP_TERRAFORM_WORKSPACE_DEV>`
 
-**File to modify:** `infra/dev/terraform.tfvars.sample` - rename by removing ".sample" from name
+**File to modify:** `infra/dev/terraform.tfvars.sample` - rename by removing ".sample" from name and change contents
 
-**Referred file:** `infra/dev/variables.tf` - operator-IP variable consumed by the SSH-access NSG rule also here
-
-**Referring files:**
-
-**With no modifications:**
+`infra/dev/variables.tf` declares `operator-IP` variable consumed by the SSH-access NSG rule also here
 
 ### 2.1 Backend and provider
 `infra/dev/main.tf`
@@ -488,7 +234,7 @@ Applied against workspace `<HCP_TERRAFORM_WORKSPACE_DEV>`
 `infra/dev/networking.tf`
 
 ### 2.3 Managed Identity
-`infra/dev/identity.tf`.
+`infra/dev/identity.tf`
 Note:
 ```hcl
 # Only DEV builds and pushes images — the GitHub Actions workflow is configured to fail
@@ -507,7 +253,7 @@ resource "azurerm_role_assignment" "gha_dev_acr_push" {
 ```
 
 ### 2.4 Development Key Vault
-`infra/dev/key-vault.tf`.
+`infra/dev/key-vault.tf`
 
 ### 2.5 Azure Bastion — not provisioned
 `infra/dev/bastion.tf`**
@@ -515,7 +261,7 @@ Note: This is the recommended pattern for a subscription with standard public-IP
 **Check Note on `az ssh vm` provisioning in Section 2.9.**
 
 ### 2.6 API Management
-`infra/dev/api-management.tf`.
+`infra/dev/api-management.tf`
 Note: Operations are declared per-route explicitly rather than through a wildcard template — API Management's template language does not accept `/*` as a catch-all; the correct wildcard syntax is `/{*path}` with an accompanying `template_parameter` block, and this project's confirmed-working configuration uses explicit routes instead.
 
 **Files that may need modifications:**
@@ -533,7 +279,7 @@ az postgres flexible-server list-skus --location centralindia --output table
 az postgres flexible-server list-skus --location centralindia --output table
 ```
 
-**File to modify:** `infra/dev/postgresql.tf`.
+**File to modify:** `infra/dev/postgresql.tf`
 
 ```hcl
 resource "azurerm_private_dns_zone" "postgres" {
@@ -714,8 +460,7 @@ az ssh vm --resource-group eai-dev-rg --name eai-dev-host
 
 UAT's infrastructure (`infra/uat/`) is structurally identical to Development's (Phase 2.3–2.9), differing only in identifiers. It is not reproduced in full here; only the differences and the apply sequence are given.
 
-**Refer to file:** `infra/uat/terraform.tfvars.sample`
-**File to modify:** `infra/uat/variables.tf`.
+**File to modify:** `infra/uat/terraform.tfvars.sample` - rename by removing ".sample" from name and change contents
 
 **Substitutions relative to `infra/dev/`:**
 

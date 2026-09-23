@@ -1,7 +1,7 @@
 networks:
   eai-mesh:
     driver: bridge
-    name: eai-mesh
+    # name: eai-mesh
 
 volumes:
   postgres_persistent_engine_data:
@@ -11,7 +11,7 @@ services:
   # Node 1: Relational Enterprise Storage Tier
   postgres-db:
     image: postgres:16-alpine
-    container_name: postgres-db
+    # container_name: postgres-db
     restart: always
     command: postgres -c log_timezone=Asia/Kolkata -c timezone=Asia/Kolkata
     environment:
@@ -19,12 +19,13 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set in .env}
       - POSTGRES_DB=smart_meter_warehouse
       - TZ=Asia/Kolkata
-    ports:
-      - "5432:5432"
+    ports: ["5432:5432"]
+      # Comment above and uncomment the line below to override the host port for Postgres to prevent collision with another set of services on port 5432
+      # Defaults to 5432 on the host if POSTGRES_HOST_PORT is unset
+      # - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_persistent_engine_data:/var/lib/postgresql/data
-    networks:
-      - eai-mesh
+    networks: [eai-mesh]
     # NEW — fixes the gap architecture.md Section 6.2.1 already flagged: without 
     # this, `depends_on` only waits for the container to start, not for Postgres 
     # to finish initializing and accept connections.
@@ -37,13 +38,16 @@ services:
   # Node 2: High-Speed Validation API Tier
   python-validator:
     build: { context: ./02-python-transformation-api, dockerfile: Dockerfile }
-    container_name: python-validator
+    #container_name: python-validator
     restart: always
     environment:
       - API_SECURITY_TOKEN=${API_SECURITY_TOKEN:?set in .env}
       - DATABASE_URL=postgresql+psycopg://smart_meter_admin:${POSTGRES_PASSWORD:?set in .env}@postgres-db:5432/smart_meter_warehouse
       - TZ=Asia/Kolkata
-    ports: ["8082:8082"]    # fine to keep exposed for LOCAL dev/testing — this is the dev compose file only
+    ports: [8082:8082]
+    # Comment above and uncomment the line below to override the host port for python-validator to prevent collision with another set of services on port 8082
+      # Defaults to 8082 on the host if VALIDATOR_HOST_PORT is unset
+      # - "${VALIDATOR_HOST_PORT:-8082}:8082"  # fine to keep exposed for LOCAL dev/testing — this is the dev compose file only
     depends_on:
       postgres-db: { condition: service_healthy }
     networks: [eai-mesh]
@@ -51,7 +55,7 @@ services:
   # Node 3: Enterprise Gateway Ingress Orchestrator
   java-gateway:
     build: { context: ./01-java-ingestion-service, dockerfile: Dockerfile }
-    container_name: java-gateway
+    # container_name: java-gateway
     restart: always
     environment:
       - SERVER_PORT=8081
@@ -61,5 +65,8 @@ services:
       - TZ=Asia/Kolkata
       - JAVA_OPTS=-Duser.timezone=Asia/Kolkata
     ports: ["8081:8081"]
+      # Comment above and uncomment the line below to override the host port for java-gateway to prevent collision with another set of services on port 8081
+      # Defaults to 8081 on the host if GATEWAY_HOST_PORT is unset
+      # - "${GATEWAY_HOST_PORT:-8081}:8081"  # fine to keep exposed for LOCAL dev/testing — this is the dev compose file only
     depends_on: [python-validator]
     networks: [eai-mesh]
