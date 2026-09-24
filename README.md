@@ -1,4 +1,5 @@
 # Enterprise Integration Pipeline — DevOps, Java, Python, Postgres, SpringBoot, FastAPI, Github, Docker Compose, CI, Release Management, Azure Free-tier, Terraform IaC
+# EAI Azure POC — conflict drill A
 
 # EAI Azure POC — conflict drill B
 
