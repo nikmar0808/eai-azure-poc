@@ -2,8 +2,6 @@
 
 # EAI Azure POC
 
-> Drill scratch line — reverted in EPA-20
-
 This project implements a small enterprise integration flow in which a Java Spring Boot service receives smart-meter data, validates and forwards the payload to a Python transformation API, and persists the resulting data in PostgreSQL.
 
 This implementation targets Microsoft Azure and is structured as a three-environment (Development, UAT, Production) release pipeline, using Microsoft Entra ID federated identity, Azure Container Registry, Azure Key Vault, Azure Database for PostgreSQL Flexible Server, Azure API Management, and HCP Terraform for infrastructure state.
