@@ -70,3 +70,16 @@ services:
       # - "${GATEWAY_HOST_PORT:-8081}:8081"  # fine to keep exposed for LOCAL dev/testing — this is the dev compose file only
     depends_on: [python-validator]
     networks: [eai-mesh]
+
+  # Node 4: Web Front-End Gateway
+  node-frontend:
+    build: { context: ./03-node-frontend, dockerfile: Dockerfile }
+    restart: always
+    environment:
+      - PYTHON_VALIDATOR_BASE_URL=http://python-validator:8082
+      - API_SECURITY_TOKEN=${API_SECURITY_TOKEN:?set in .env}
+      - PORT=3000
+      - TZ=Asia/Kolkata
+    ports: ["3000:3000"]
+    depends_on: [python-validator]
+    networks: [eai-mesh]
