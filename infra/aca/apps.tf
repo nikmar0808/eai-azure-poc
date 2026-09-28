@@ -187,7 +187,7 @@ resource "azurerm_container_app" "node_frontend" {
     container {
       name   = "node-frontend"
       # Substitute the $sha value recorded in step 2 above.
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-node-frontend:63dd47bb339e56c8da9c820eb6557f76b84c5167"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-node-frontend:2953870af118a0e716336ace1e90ba256a041dd6"
       cpu    = 0.25
       memory = "0.5Gi"
       env {
