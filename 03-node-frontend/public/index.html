@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EAI POC — Smart Meter Ingest (Node frontend)</title>
+</head>
+<body>
+  <h1>Submit a meter reading</h1>
+  <form id="ingest-form">
+    <label>Meter ID: <input name="meter_id" value="MTR-NODE-001" required /></label><br/>
+    <label>Grid zone: <input name="grid_zone" value="ZONE-A" required /></label><br/>
+    <label>Timestamp (ISO): <input name="timestamp" value="2026-09-26T00:00:00Z" required /></label><br/>
+    <label>kWh value: <input name="kwh_value" type="number" step="0.001" value="12.5" required /></label><br/>
+    <button type="submit">Submit</button>
+  </form>
+  <pre id="result"></pre>
+
+  <script>
+    document.getElementById('ingest-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const payload = Object.fromEntries(form.entries());
+      const resultEl = document.getElementById('result');
+      resultEl.textContent = 'Submitting...';
+      try {
+        const res = await fetch('/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const body = await res.json();
+        resultEl.textContent = JSON.stringify(body, null, 2);
+      } catch (err) {
+        resultEl.textContent = 'Request failed: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>
