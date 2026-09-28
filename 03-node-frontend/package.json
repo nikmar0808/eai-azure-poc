@@ -1,5 +1,5 @@
 {
-  "name": "node-frontend",
+  "name": "03-node-frontend",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {

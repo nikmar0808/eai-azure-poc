@@ -28,7 +28,11 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const body = await res.json();
+        /*const body = await res.json();*/
+        const text = await res.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = { nonJsonResponse: text, status: res.status }; }
+
         resultEl.textContent = JSON.stringify(body, null, 2);
       } catch (err) {
         resultEl.textContent = 'Request failed: ' + err.message;

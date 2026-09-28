@@ -47,6 +47,7 @@ app.post('/submit', async (req, res) => {
         'X-EAI-TOKEN': API_SECURITY_TOKEN,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
     });
 
     // python-validator's response is genuine application/json (FastAPI's
@@ -62,6 +63,10 @@ app.post('/submit', async (req, res) => {
       upstreamBody: body,
     });
   } catch (err) {
+    if (err.name === 'TimeoutError') {
+      console.error('[submit] python-validator did not respond within 10s');
+      return res.status(504).json({ error: 'python-validator timed out' });
+    }    
     // A network-level failure (upstream unreachable, DNS failure,
     // connection refused) is distinct from an upstream HTTP error
     // response above, and is reported distinctly here — this
