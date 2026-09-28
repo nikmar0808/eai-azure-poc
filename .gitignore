@@ -33,4 +33,4 @@ crash.*.log
 
 *.class
 *.jar
-node_modules
+node_modules/
