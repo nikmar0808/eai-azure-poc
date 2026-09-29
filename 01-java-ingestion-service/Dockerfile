@@ -25,7 +25,7 @@ WORKDIR /app
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Steal ONLY the compiled standalone portable JAR from the build stage
-COPY --from=compiler /build/target/ingestion-service-1.0.0.jar gateway.jar
+COPY --from=compiler /build/target/ingestion-service-2.0.0.jar gateway.jar
 RUN chown -R appuser:appgroup /app
 USER appuser
 
