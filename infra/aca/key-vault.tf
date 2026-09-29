@@ -37,6 +37,13 @@ resource "random_password" "api_token" {
   special = false
 }
 
+resource "azurerm_key_vault_secret" "api_token" {
+  name         = "api-security-token"
+  value        = random_password.api_token.result
+  key_vault_id = azurerm_key_vault.poc.id
+  depends_on   = [azurerm_role_assignment.terraform_kv_officer]
+}
+
 resource "azurerm_key_vault_secret" "db_password" {
   name         = "database-password"
   value        = random_password.db_password.result
@@ -44,9 +51,9 @@ resource "azurerm_key_vault_secret" "db_password" {
   depends_on   = [azurerm_role_assignment.terraform_kv_officer]
 }
 
-resource "azurerm_key_vault_secret" "api_token" {
-  name         = "api-security-token"
-  value        = random_password.api_token.result
+resource "azurerm_key_vault_secret" "database_url" {
+  name         = "database-url"
+  value        = "postgresql+psycopg://smart_meter_admin:${random_password.db_password.result}@${azurerm_container_app.postgres.name}:5432/smart_meter_warehouse"
   key_vault_id = azurerm_key_vault.poc.id
-  depends_on   = [azurerm_role_assignment.terraform_kv_officer]
+  depends_on   = [azurerm_role_assignment.terraform_kv_officer, azurerm_container_app.postgres]
 }
