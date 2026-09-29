@@ -52,9 +52,14 @@ resource "azurerm_container_app" "python_validator" {
   # python-validator container above,
   # once the Key Vault secret references exist — deliberately staged 
   # so the container's first deploy is verifiable without them.
+  # secret {
+  #   name                = "database-url"
+  #   key_vault_secret_id = "${azurerm_key_vault.poc.vault_uri}secrets/${azurerm_key_vault_secret.db_password.name}"
+  #   identity             = azurerm_user_assigned_identity.aca.id
+  # }
   secret {
     name                = "database-url"
-    key_vault_secret_id = "${azurerm_key_vault.poc.vault_uri}secrets/${azurerm_key_vault_secret.db_password.name}"
+    key_vault_secret_id = azurerm_key_vault_secret.database_url.id
     identity             = azurerm_user_assigned_identity.aca.id
   }
 
@@ -69,7 +74,7 @@ resource "azurerm_container_app" "python_validator" {
       name   = "python-validator"
       # image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:<SHA>"
       # The SHA tag is the same SHA the VM path already built and pushed to the shared registry - 8231a... string below.
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:8231a19d3b6ae1e085a678a02f7da77b4681e39b"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:22af8d45510449b34036252d4314233c26f7d59c"
       cpu    = 0.5
       memory = "1Gi"
       env {
@@ -122,10 +127,20 @@ resource "azurerm_container_app" "java_gateway" {
     }
   }
 
+  # Same identity, same Key Vault secret (api-security-token) python_validator
+  # reads — no new secret is created, and no new RBAC grant is needed:
+  # azurerm_role_assignment.aca_kv_user (key-vault.tf) already gives
+  # this same identity Key Vault Secrets User on this vault.
+  secret {
+    name                = "api-security-token"
+    key_vault_secret_id = azurerm_key_vault_secret.api_token.id
+    identity             = azurerm_user_assigned_identity.aca.id
+  }
+
   template {
     container {
       name   = "java-gateway"
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-java-gateway:a93191b5f2dbd5edb6c32d1dd1377fdb200eea81"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-java-gateway:22af8d45510449b34036252d4314233c26f7d59c"
       cpu    = 0.5
       memory = "1Gi"
       env {
@@ -138,6 +153,10 @@ resource "azurerm_container_app" "java_gateway" {
         # name (python-validator) the java-gateway config already expects.
         name  = "INTEGRATION_PYTHON_BASE-URL"
         value = "http://${azurerm_container_app.python_validator.name}"
+      }
+      env {
+        name  = "INTEGRATION_PYTHON_AUTH-TOKEN"
+        secret_name = "api-security-token"
       }
     }
     min_replicas = 0 # scales to zero when idle — the Consumption-plan trade-off
@@ -187,7 +206,7 @@ resource "azurerm_container_app" "node_frontend" {
     container {
       name   = "node-frontend"
       # Substitute the $sha value recorded in step 2 above.
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-node-frontend:2953870af118a0e716336ace1e90ba256a041dd6"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-node-frontend:22af8d45510449b34036252d4314233c26f7d59c"
       cpu    = 0.25
       memory = "0.5Gi"
       env {
