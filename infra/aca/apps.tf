@@ -125,7 +125,7 @@ resource "azurerm_container_app" "java_gateway" {
   template {
     container {
       name   = "java-gateway"
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-java-gateway:8231a19d3b6ae1e085a678a02f7da77b4681e39b"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-java-gateway:a93191b5f2dbd5edb6c32d1dd1377fdb200eea81"
       cpu    = 0.5
       memory = "1Gi"
       env {
