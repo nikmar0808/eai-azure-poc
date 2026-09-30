@@ -1,21 +1,20 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Header, Security, status
-from fastapi.security.api_key import APIKeyHeader
+from fastapi import APIRouter, Depends, HTTPException, status
+# from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.orm import Session
-import dateutil.parser
-
+from app.api.authenticator import authenticate_request
 # --- DATABASE INFRASTRUCTURE IMPORTS ---
 from app.database.connection import get_db_session
 from app.database.models import SmartMeterIntervalRecord
 from app.schemas.meter import SmartMeterPayload as SmartMeterPayloadSchema
-from app.config import settings
+# from app.config import settings
 
 # Configure structured logging for the API module
 logger = logging.getLogger(__name__)
 
-# Declare the specific header key name the system will look for in network packets
-API_KEY_NAME = "X-EAI-TOKEN"
-api_key_header_guard = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+# # Declare the specific header key name the system will look for in network packets
+# API_KEY_NAME = "X-EAI-TOKEN"
+# api_key_header_guard = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 # FastAPI is built natively on top of the OpenAPI Specification (formerly known as Swagger).
 # Because we explicitly declared our data contracts using Pydantic and type hints,
@@ -28,20 +27,20 @@ api_key_header_guard = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 # This is how professional developers version their APIs so they don't break older client integrations when upgrading software.
 router = APIRouter(prefix="/api/v1", tags=["Ingestion & Transformation"])
 
-# -------------------------------------------------------------------------
-# SECURITY INTERCEPTOR FUNCTION
-# -------------------------------------------------------------------------
-def authenticate_request(api_key: str = Security(api_key_header_guard)):
-    """
-    Validates inbound network header keys against our centralized secure token contract.
-    """
-    if api_key == settings.API_SECURITY_TOKEN:
-        return api_key
-    logger.warning("Security Breach Attempt: Unauthorized connection dropped due to missing or invalid token credentials.")
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Access Denied: Invalid Security Credentials."
-    )
+# # -------------------------------------------------------------------------
+# # SECURITY INTERCEPTOR FUNCTION
+# # -------------------------------------------------------------------------
+# def authenticate_request(api_key: str = Security(api_key_header_guard)):
+#     """
+#     Validates inbound network header keys against our centralized secure token contract.
+#     """
+#     if api_key == settings.API_SECURITY_TOKEN:
+#         return api_key
+#     logger.warning("Security Breach Attempt: Unauthorized connection dropped due to missing or invalid token credentials.")
+#     raise HTTPException(
+#         status_code=status.HTTP_401_UNAUTHORIZED,
+#         detail="Access Denied: Invalid Security Credentials."
+#     )
 
 # -------------------------------------------------------------------------
 # SECURED INGESTION ROUTE

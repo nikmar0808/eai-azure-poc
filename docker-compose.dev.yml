@@ -83,3 +83,12 @@ services:
     ports: ["3000:3000"]
     depends_on: [python-validator]
     networks: [eai-mesh]
+
+  react-readings:
+    build: { context: ./04-react-readings, dockerfile: Dockerfile }
+    restart: always
+    environment:
+      - API_SECURITY_TOKEN=${API_SECURITY_TOKEN:?set in .env}
+    ports: ["8080:80"]
+    depends_on: [python-validator]
+    networks: [eai-mesh]

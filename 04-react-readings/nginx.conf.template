@@ -1,0 +1,14 @@
+server {
+    listen 80;
+
+    location /api/ {
+        proxy_pass http://python-validator:8082/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-EAI-TOKEN "${API_SECURITY_TOKEN}";
+    }
+
+    location / {
+        root   /usr/share/nginx/html;
+        try_files $uri /index.html;
+    }
+}
