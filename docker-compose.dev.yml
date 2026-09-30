@@ -88,7 +88,9 @@ services:
     build: { context: ./04-react-readings, dockerfile: Dockerfile }
     restart: always
     environment:
+      - PYTHON_VALIDATOR_BASE_URL=http://python-validator:8082
       - API_SECURITY_TOKEN=${API_SECURITY_TOKEN:?set in .env}
+      - TZ=Asia/Kolkata
     ports: ["8080:80"]
     depends_on: [python-validator]
     networks: [eai-mesh]

@@ -2,7 +2,7 @@ server {
     listen 80;
 
     location /api/ {
-        proxy_pass http://python-validator:8082/api/;
+        proxy_pass ${PYTHON_VALIDATOR_BASE_URL}/api/;
         proxy_set_header Host $host;
         proxy_set_header X-EAI-TOKEN "${API_SECURITY_TOKEN}";
     }

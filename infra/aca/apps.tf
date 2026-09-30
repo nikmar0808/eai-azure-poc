@@ -74,7 +74,7 @@ resource "azurerm_container_app" "python_validator" {
       name   = "python-validator"
       # image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:<SHA>"
       # The SHA tag is the same SHA the VM path already built and pushed to the shared registry - 8231a... string below.
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:22af8d45510449b34036252d4314233c26f7d59c"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-python-validator:42734264698abfa901506c1a4e0da2e9db05f120"
       cpu    = 0.5
       memory = "1Gi"
       env {
@@ -233,5 +233,65 @@ resource "azurerm_container_app" "node_frontend" {
   }
 }
 
+
+resource "azurerm_container_app" "react_readings" {
+  name                         = "poc-eai-react-readings"
+  container_app_environment_id = azurerm_container_app_environment.poc.id
+  resource_group_name          = azurerm_resource_group.poc_aca.name
+  revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.aca.id]
+  }
+
+  registry {
+    server   = data.azurerm_container_registry.shared.login_server
+    identity = azurerm_user_assigned_identity.aca.id
+  }
+
+  secret {
+    name                = "api-security-token"
+    key_vault_secret_id = azurerm_key_vault_secret.api_token.id
+    identity             = azurerm_user_assigned_identity.aca.id
+  }
+
+  ingress {
+    external_enabled = true
+    target_port       = 80
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
+  template {
+    container {
+      name   = "react-readings"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-react-readings:42734264698abfa901506c1a4e0da2e9db05f120"
+      cpu    = 0.25
+      memory = "0.5Gi"
+      env {
+        # Container Apps' internal DNS resolves other apps in the same
+        # environment by name, including an internal-only app
+        # (python_validator's external_enabled = false only affects public
+        # reachability, not resolution from another app in the same
+        # environment) — the identical mechanism java_gateway already uses
+        # to reach python_validator today.
+        name  = "PYTHON_VALIDATOR_BASE_URL"
+        value = "http://${azurerm_container_app.python_validator.name}"
+      }
+      env {
+        name        = "API_SECURITY_TOKEN"
+        secret_name = "api-security-token"
+      }
+    }
+    min_replicas = 0
+    max_replicas = 1
+  }
+}
+
 output "java_gateway_fqdn" { value = azurerm_container_app.java_gateway.latest_revision_fqdn }
 output "node_frontend_fqdn" { value = azurerm_container_app.node_frontend.latest_revision_fqdn }
+output "react_readings_fqdn" { value = azurerm_container_app.react_readings.latest_revision_fqdn }
