@@ -269,7 +269,7 @@ resource "azurerm_container_app" "react_readings" {
   template {
     container {
       name   = "react-readings"
-      image  = "${data.azurerm_container_registry.shared.login_server}/eai-react-readings:e7ac91efba9a74c18870ef4955aff930cd733b84"
+      image  = "${data.azurerm_container_registry.shared.login_server}/eai-react-readings:45b27a5bc555cd6e9d796b9bd660a4cc48c802f7"
       cpu    = 0.25
       memory = "0.5Gi"
       env {
