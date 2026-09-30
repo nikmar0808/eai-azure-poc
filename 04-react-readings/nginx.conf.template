@@ -5,7 +5,6 @@ server {
         proxy_pass ${PYTHON_VALIDATOR_BASE_URL}/api/;
         proxy_set_header Host $host;
         proxy_set_header X-EAI-TOKEN "${API_SECURITY_TOKEN}";
-        add_header X-Debug-Upstream-Status $upstream_status always;
     }
 
     location / {
