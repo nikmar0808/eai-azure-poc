@@ -1,7 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
 from app.api.transform import router as transform_router
+from app.api.readings import router as readings_router
+
 from app.config import settings
 
 # --- DATABASE ENGINE IMPORTS ---
@@ -49,6 +54,23 @@ def read_root():
         "engine": "FastAPI",
         "version": settings.APP_VERSION
     }
+# health-check for the database
+@app.get("/health")
+def health_check():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_status = "UP"
+    except Exception:
+        db_status = "DOWN"
+
+    overall_status = "UP" if db_status == "UP" else "DOWN"
+    status_code = 200 if db_status == "UP" else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": overall_status, "database": db_status},
+    )
 
 # Register the decoupled enterprise ingestion routers
 app.include_router(transform_router)
+app.include_router(readings_router)

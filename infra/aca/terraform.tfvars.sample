@@ -1,0 +1,8 @@
+# gha_deploy_client_id = <EXISTING bootstrap AZURE_CLIENT_ID_DEV>This phase builds new images, so it needs the one identity that can
+# push. In the original three-role (DEV, UAT, PROD) model, only dev's identity is granted AcrPush on the shared registry, the other
+# two (UAT and PROD) hold AcrPull only, since they never build, only promote an already-built tag. The value is the same GUID already
+# sitting in the GitHub repository variable AZURE_CLIENT_ID_DEV — nothing new is derived or recorded here
+gha_deploy_client_id = "<AZURE_CLIENT_ID_DEV>"
+acr_name              = "<AZURE_ACR_NAME>" — the value already stored as the GitHub repository variable
+acr_resource_group    = "<the resource group the shared registry was actually created in, e.g. eai-shared-rg>"
+key_vault_name        = "poc-eai-kv-<4 random lowercase alphanumeric chars>" # globally unique — this one IS new, see B.4
