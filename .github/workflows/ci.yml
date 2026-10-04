@@ -1,5 +1,14 @@
 name: CI
 
+# Design (ADR-009):
+#   push / pull_request  -> scans + build/test of all four services
+#   pull_request         -> image-scan: build and Trivy-scan every image, push nothing
+#   push to develop      -> publish-images: GATED by GitHub Environment "poc"
+#                           (required reviewer), builds, scans and pushes all four images by commit SHA
+#   workflow_dispatch    -> deploy-poc: GATED by Environment "poc", points the four Container Apps
+#                           at an already-published image tag. No build step, ever (build once, deploy by tag).
+# Terraform owns the infrastructure; this pipeline owns the image tag (see lifecycle.ignore_changes in infra/aca/apps.tf).
+
 on:
   push:
     branches: ["**"]
@@ -8,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Git commit SHA of the image to promote (already built and pushed to ACR)"
+        description: "Git commit SHA to deploy (all four images must already exist in ACR with this tag)"
         required: true
         type: string
 
@@ -31,8 +40,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # Report "verified" (provably live) AND "unknown" (could not be checked) findings. The old --only-verified
+      # setting could never flag a home-made token, because there is no issuer to verify it against.
+      # This action scans the commits new in the push or pull request; the full history is covered by the
+      # one-off baseline in Phase C.7 and by the Gitleaks step below.
       - uses: trufflesecurity/trufflehog@v3.94.1
-        with: { extra_args: --only-verified }
+        with: { extra_args: "--results=verified,unknown" }
+      # Gitleaks: generic secret rules plus the project's own retired literals. The literals live in the
+      # repository secret GITLEAKS_PROJECT_REGEX, never in the repository, and --redact keeps any finding's
+      # value out of this (public) log.
+      - name: Gitleaks scan of the full history
+        env:
+          PROJECT_REGEX: ${{ secrets.GITLEAKS_PROJECT_REGEX }}
+        run: |
+          set -e
+          if [ -z "$PROJECT_REGEX" ]; then echo "::error::repository secret GITLEAKS_PROJECT_REGEX is not set"; exit 1; fi
+          {
+            echo '[extend]'
+            echo 'useDefault = true'
+            echo '[[rules]]'
+            echo 'id = "eai-project-literals"'
+            echo "regex = '''${PROJECT_REGEX}'''"
+          } > "$RUNNER_TEMP/gitleaks.toml"
+          # latest for now: after the first green run, pin to the version printed by `gitleaks version`
+          docker run --rm -v "$PWD:/repo" -v "$RUNNER_TEMP/gitleaks.toml:/gitleaks.toml:ro" \
+            zricethezav/gitleaks:latest detect --source /repo --config /gitleaks.toml --redact -v
 
   dependency-scan:
     runs-on: ubuntu-latest
@@ -48,6 +80,8 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
+          ignore-unfixed: true            # only findings that have a fixed version are actionable
+          trivyignores: .trivyignore      # accepted findings, each with a reason and an expiry date
           exit-code: 1
           format: sarif
           output: trivy-fs-results.sarif
@@ -98,170 +132,187 @@ jobs:
           API_SECURITY_TOKEN: ci-only-test-token   # disposable CI test value, not an actual credential
         run: pytest tests
 
+  # No test suite exists for the Node service yet (Jest/RTL arrive in POC 4). What this job honestly proves:
+  # the lock file installs cleanly and server.js parses. It is a build check, not a test run.
+  node-build-check:
+    needs: [secret-scan, dependency-scan]
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/')))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: 03-node-frontend/package-lock.json }
+      - working-directory: 03-node-frontend
+        run: npm ci
+      - working-directory: 03-node-frontend
+        run: node --check server.js
 
-  docker-build-push:
-    needs: [java-build-test, python-build-test]
-    # No `environment:` key — matches the ref-based federated credential
-    # (bootstrap: gha_deploy_dev_ref), not the environment-based one.
+  # `npm run build` runs the TypeScript compiler first, so a type error fails this job.
+  react-build:
+    needs: [secret-scan, dependency-scan]
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/')))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: 04-react-readings/package-lock.json }
+      - working-directory: 04-react-readings
+        run: npm ci
+      - working-directory: 04-react-readings
+        run: npm run build
+
+  # Pull requests only: build each image and scan it, push nothing, no Azure login, no approval needed.
+  # This is what lets a vulnerable image block a merge before it ever reaches develop.
+  image-scan:
+    name: image-scan (${{ matrix.image }})
+    needs: [java-build-test, python-build-test, node-build-check, react-build]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # one vulnerable image must not hide the result for the other three
+      matrix:
+        include:
+          - { image: eai-java-gateway,      context: 01-java-ingestion-service }
+          - { image: eai-python-validator,  context: 02-python-transformation-api }
+          - { image: eai-node-frontend,     context: 03-node-frontend }
+          - { image: eai-react-readings,    context: 04-react-readings }
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ${{ matrix.image }}:pr ./${{ matrix.context }}
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ matrix.image }}:pr
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+
+  # Push to develop only. The `environment: poc` line is what pauses this job for the required reviewer,
+  # AND what gives the job the OIDC subject  ...:environment:poc  that Entra's federated credential trusts.
+  publish-images:
+    needs: [java-build-test, python-build-test, node-build-check, react-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
+    environment: poc
     permissions: { contents: read, id-token: write }
+    env:
+      TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID_DEV }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}  # repository variable (Step 5)
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - run: az acr login --name ${{ vars.ACR_NAME }}
-      # ACR repository is set to immutable tags at creation — re-pushing an
-      # existing tag is rejected rather than silently overwritten. Check
-      # first, matching AWS's ECR idempotency check.
-      - name: Check whether this commit's images already exist
-        id: check-image
+      - run: az acr login --name "$ACR_NAME"
+      - name: Build all four images
         run: |
-          if az acr repository show --name ${{ vars.ACR_NAME }} --image eai-java-gateway:${{ github.sha }} >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.check-image.outputs.skip == 'false'
+          set -e
+          docker build -t ${ACR_REGISTRY}/eai-java-gateway:${TAG}      ./01-java-ingestion-service
+          docker build -t ${ACR_REGISTRY}/eai-python-validator:${TAG}  ./02-python-transformation-api
+          docker build -t ${ACR_REGISTRY}/eai-node-frontend:${TAG}     ./03-node-frontend
+          docker build -t ${ACR_REGISTRY}/eai-react-readings:${TAG}    ./04-react-readings
+      # Scan exactly what will be pushed. Any step failing here means nothing has been pushed yet.
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_REGISTRY }}/eai-java-gateway:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_REGISTRY }}/eai-python-validator:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_REGISTRY }}/eai-node-frontend:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ env.ACR_REGISTRY }}/eai-react-readings:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+      - name: Push (a tag that already exists is skipped, so a re-run is safe)
         run: |
-          docker build -t ${ACR_REGISTRY}/eai-java-gateway:${{ github.sha }} ./01-java-ingestion-service
-          docker build -t ${ACR_REGISTRY}/eai-python-validator:${{ github.sha }} ./02-python-transformation-api
-      - if: steps.check-image.outputs.skip == 'false'
-        uses: aquasecurity/trivy-action@0.35.0
-        # bypassing this temporarily by setting exit-code = 0
-        # with: { image-ref: "${{ env.ACR_REGISTRY }}/eai-java-gateway:${{ github.sha }}", severity: "CRITICAL,HIGH", exit-code: 1 }
-        with: { image-ref: "${{ env.ACR_REGISTRY }}/eai-java-gateway:${{ github.sha }}", severity: "CRITICAL,HIGH", exit-code: 0 }
-      - if: steps.check-image.outputs.skip == 'false'
-        uses: aquasecurity/trivy-action@0.35.0
-        # bypassing this temporarily by setting exit-code = 0
-        # with: { image-ref: "${{ env.ACR_REGISTRY }}/eai-python-validator:${{ github.sha }}", severity: "CRITICAL,HIGH", exit-code: 1 }
-        with: { image-ref: "${{ env.ACR_REGISTRY }}/eai-python-validator:${{ github.sha }}", severity: "CRITICAL,HIGH", exit-code: 0 }
-      - if: steps.check-image.outputs.skip == 'false'
-        run: |
-          docker push ${ACR_REGISTRY}/eai-java-gateway:${{ github.sha }}
-          docker push ${ACR_REGISTRY}/eai-python-validator:${{ github.sha }}
+          set -e
+          for img in eai-java-gateway eai-python-validator eai-node-frontend eai-react-readings; do
+            if az acr repository show --name "$ACR_NAME" --image "$img:$TAG" >/dev/null 2>&1; then
+              echo "$img:$TAG already in the registry, skipping push"
+            else
+              docker push "${ACR_REGISTRY}/${img}:${TAG}"
+            fi
+          done
 
-  deploy-dev:
-    needs: docker-build-push
-    if: github.ref == 'refs/heads/develop'
+  # Manual only. Points the four Container Apps at an already-published tag. Never builds.
+  # The Postgres Container App is deliberately not touched: it runs a public image and has no CI-owned tag.
+  deploy-poc:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
-    environment: dev
+    environment: poc
     permissions: { contents: read, id-token: write }
+    env:
+      TAG: ${{ inputs.image_tag }}
+      # These two literals must equal what infra/aca declares (resource group name in main.tf; the four
+      # azurerm_container_app names in apps.tf are <PREFIX>-python-validator, -java-gateway, -node-frontend,
+      # -react-readings). Terraform and this file are two places that must agree; they are constants, so no variables.
+      RG: poc-eai-aca-rg
+      PREFIX: poc-eai
     steps:
-      - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID_DEV }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Deploy via VM Run Command
+      - name: Confirm all four images carry the tag being deployed
         run: |
-          COMPOSE_B64=$(base64 -w0 infra/docker-compose.prod.yml)
-          DB_PASS=$(az keyvault secret show --vault-name ${{ vars.DEV_KEY_VAULT_NAME }} --name database-password --query value -o tsv)
-          API_TOKEN=$(az keyvault secret show --vault-name ${{ vars.DEV_KEY_VAULT_NAME }} --name api-security-token --query value -o tsv)
-          az vm run-command invoke \
-            --resource-group eai-dev-rg \
-            --name eai-dev-host \
-            --command-id RunShellScript \
-            --scripts  "set -e" \
-              "echo 'Waiting for cloud-init bootstrap...'" \
-              "cloud-init status --wait" \
-              "echo 'Validating VM prerequisites...'" \
-              "command -v az" \
-              "docker --version" \
-              "docker compose version" \
-              "test -d /opt/eai" \
-              "echo $COMPOSE_B64 | base64 -d > /opt/eai/docker-compose.prod.yml" \
-              "echo DATABASE_URL=postgresql+psycopg://smart_meter_admin:${DB_PASS}@${{ vars.DEV_POSTGRES_FQDN }}:5432/smart_meter_warehouse > /opt/eai/.env" \
-              "echo API_SECURITY_TOKEN=${API_TOKEN} >> /opt/eai/.env" \
-              "echo ACR_REGISTRY=${ACR_REGISTRY} >> /opt/eai/.env" \
-              "echo IMAGE_TAG=${{ github.sha }} >> /opt/eai/.env" \
-              "az login --identity --client-id ${{ vars.DEV_VM_IDENTITY_CLIENT_ID }}" \
-              "az acr login --name ${{ vars.ACR_NAME }}" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.prod.yml --env-file .env pull" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.prod.yml --env-file .env up -d"
-
-  promote-uat:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/uat'
-    runs-on: ubuntu-latest
-    environment: uat
-    permissions: { contents: read, id-token: write }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID_UAT }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Confirm the image tag being promoted actually exists
-        run: az acr repository show --name ${{ vars.ACR_NAME }} --image eai-java-gateway:${{ inputs.image_tag }}
-      - name: Deploy via VM Run Command
+          set -e
+          for img in eai-java-gateway eai-python-validator eai-node-frontend eai-react-readings; do
+            az acr repository show --name "$ACR_NAME" --image "$img:$TAG" --query name -o tsv
+          done
+      - name: Point the Container Apps at the tag (backend first)
         run: |
-          COMPOSE_B64=$(base64 -w0 infra/docker-compose.prod.yml)
-          DB_PASS=$(az keyvault secret show --vault-name ${{ vars.UAT_KEY_VAULT_NAME }} --name database-password --query value -o tsv)
-          API_TOKEN=$(az keyvault secret show --vault-name ${{ vars.UAT_KEY_VAULT_NAME }} --name api-security-token --query value -o tsv)
-          az vm run-command invoke \
-            --resource-group eai-uat-rg \
-            --name eai-uat-host \
-            --command-id RunShellScript \
-            --scripts  "set -e" \
-              "echo 'Waiting for cloud-init bootstrap...'" \
-              "cloud-init status --wait" \
-              "echo 'Validating VM prerequisites...'" \
-              "command -v az" \
-              "docker --version" \
-              "docker compose version" \
-              "test -d /opt/eai" \
-              "echo $COMPOSE_B64 | base64 -d > /opt/eai/docker-compose.prod.yml" \
-              "echo DATABASE_URL=postgresql+psycopg://smart_meter_admin:${DB_PASS}@${{ vars.UAT_POSTGRES_FQDN }}:5432/smart_meter_warehouse > /opt/eai/.env" \
-              "echo API_SECURITY_TOKEN=${API_TOKEN} >> /opt/eai/.env" \
-              "echo ACR_REGISTRY=${ACR_REGISTRY} >> /opt/eai/.env" \
-              "echo IMAGE_TAG=${{ inputs.image_tag }} >> /opt/eai/.env" \
-              "az login --identity --client-id ${{ vars.UAT_VM_IDENTITY_CLIENT_ID }}" \
-              "az acr login --name ${{ vars.ACR_NAME }}" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ inputs.image_tag }} docker compose -f docker-compose.prod.yml --env-file .env pull" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ inputs.image_tag }} docker compose -f docker-compose.prod.yml --env-file .env up -d"
-
-  promote-prod:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: prod
-    permissions: { contents: read, id-token: write }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID_PROD }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Confirm the image tag being promoted actually exists
-        run: az acr repository show --name ${{ vars.ACR_NAME }} --image eai-java-gateway:${{ inputs.image_tag }}
-      - name: Deploy via VM Run Command
+          set -e
+          update() {
+            az containerapp update --name "$PREFIX-$1" --resource-group "$RG" \
+              --image "${ACR_REGISTRY}/eai-$1:${TAG}" --output none
+            echo "updated $PREFIX-$1 -> eai-$1:${TAG}"
+          }
+          update python-validator
+          update java-gateway
+          update node-frontend
+          update react-readings
+      # provisioningState is the gate. healthState and runningState are printed for the log, not asserted:
+      # an app scaled to zero (min_replicas = 0) legitimately reports no running replica.
+      - name: Verify the new revisions provisioned
         run: |
-          COMPOSE_B64=$(base64 -w0 infra/docker-compose.prod.yml)
-          DB_PASS=$(az keyvault secret show --vault-name ${{ vars.PROD_KEY_VAULT_NAME }} --name database-password --query value -o tsv)
-          API_TOKEN=$(az keyvault secret show --vault-name ${{ vars.PROD_KEY_VAULT_NAME }} --name api-security-token --query value -o tsv)
-          az vm run-command invoke \
-            --resource-group eai-prod-rg \
-            --name eai-prod-host \
-            --command-id RunShellScript \
-            --scripts  "set -e" \
-              "echo 'Waiting for cloud-init bootstrap...'" \
-              "cloud-init status --wait" \
-              "echo 'Validating VM prerequisites...'" \
-              "command -v az" \
-              "docker --version" \
-              "docker compose version" \
-              "test -d /opt/eai" \
-              "echo $COMPOSE_B64 | base64 -d > /opt/eai/docker-compose.prod.yml" \
-              "echo DATABASE_URL=postgresql+psycopg://smart_meter_admin:${DB_PASS}@${{ vars.PROD_POSTGRES_FQDN }}:5432/smart_meter_warehouse > /opt/eai/.env" \
-              "echo API_SECURITY_TOKEN=${API_TOKEN} >> /opt/eai/.env" \
-              "echo ACR_REGISTRY=${ACR_REGISTRY} >> /opt/eai/.env" \
-              "echo IMAGE_TAG=${{ inputs.image_tag }} >> /opt/eai/.env" \
-              "az login --identity --client-id ${{ vars.PROD_VM_IDENTITY_CLIENT_ID }}" \
-              "az acr login --name ${{ vars.ACR_NAME }}" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ inputs.image_tag }} docker compose -f docker-compose.prod.yml --env-file .env pull" \
-              "cd /opt/eai && ACR_REGISTRY=${ACR_REGISTRY} IMAGE_TAG=${{ inputs.image_tag }} docker compose -f docker-compose.prod.yml --env-file .env up -d"
+          set -e
+          for svc in python-validator java-gateway node-frontend react-readings; do
+            app="$PREFIX-$svc"
+            rev=$(az containerapp show -n "$app" -g "$RG" --query properties.latestRevisionName -o tsv)
+            state=""
+            for i in $(seq 1 30); do
+              state=$(az containerapp revision show -n "$app" -g "$RG" --revision "$rev" --query properties.provisioningState -o tsv)
+              [ "$state" = "Provisioned" ] && break
+              [ "$state" = "Failed" ] && break
+              sleep 10
+            done
+            health=$(az containerapp revision show -n "$app" -g "$RG" --revision "$rev" --query properties.healthState -o tsv)
+            running=$(az containerapp revision show -n "$app" -g "$RG" --revision "$rev" --query properties.runningState -o tsv)
+            echo "$app  revision=$rev  provisioningState=$state  healthState=$health  runningState=$running"
+            [ "$state" = "Provisioned" ] || { echo "::error::$app revision $rev did not reach Provisioned"; exit 1; }
+          done

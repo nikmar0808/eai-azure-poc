@@ -19,5 +19,15 @@ data "azuread_service_principal" "gha_deploy" {
   client_id = var.gha_deploy_client_id
 }
 
+# Lets CI run `az containerapp update` against this one resource group, and nothing else in the
+# subscription. "Contributor" is broader than the single action needed; Azure has no narrower built-in
+# role for it. A custom role limited to Microsoft.App/containerApps/write is the tighter alternative,
+# at the cost of writing and maintaining it.
+resource "azurerm_role_assignment" "gha_aca_contributor" {
+  scope                = azurerm_resource_group.poc_aca.id
+  role_definition_name = "Contributor"
+  principal_id         = data.azuread_service_principal.gha_deploy.object_id
+}
+
 output "aca_identity_client_id"     { value = azurerm_user_assigned_identity.aca.client_id }
 output "aca_identity_principal_id"  { value = azurerm_user_assigned_identity.aca.principal_id }

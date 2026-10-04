@@ -69,6 +69,13 @@ resource "azurerm_container_app" "python_validator" {
     identity             = azurerm_user_assigned_identity.aca.id
   }
 
+  # CI owns the image tag from here on (deploy-poc runs `az containerapp update --image`).
+  # Terraform owns everything else. Without this line the next `terraform apply` would
+  # "correct" the running image back to the tag hard-coded in this file.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
   template {
     container {
       name   = "python-validator"
@@ -137,6 +144,13 @@ resource "azurerm_container_app" "java_gateway" {
     identity             = azurerm_user_assigned_identity.aca.id
   }
 
+  # CI owns the image tag from here on (deploy-poc runs `az containerapp update --image`).
+  # Terraform owns everything else. Without this line the next `terraform apply` would
+  # "correct" the running image back to the tag hard-coded in this file.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
   template {
     container {
       name   = "java-gateway"
@@ -202,6 +216,13 @@ resource "azurerm_container_app" "node_frontend" {
     identity             = azurerm_user_assigned_identity.aca.id
   }
 
+  # CI owns the image tag from here on (deploy-poc runs `az containerapp update --image`).
+  # Terraform owns everything else. Without this line the next `terraform apply` would
+  # "correct" the running image back to the tag hard-coded in this file.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
   template {
     container {
       name   = "node-frontend"
@@ -264,6 +285,13 @@ resource "azurerm_container_app" "react_readings" {
       percentage      = 100
       latest_revision = true
     }
+  }
+
+  # CI owns the image tag from here on (deploy-poc runs `az containerapp update --image`).
+  # Terraform owns everything else. Without this line the next `terraform apply` would
+  # "correct" the running image back to the tag hard-coded in this file.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
   }
 
   template {

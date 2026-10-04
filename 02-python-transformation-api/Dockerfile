@@ -6,7 +6,11 @@
 # Also notice the use of FROM ... AS ... multi-stage build. 
 
 # Step 1: Use a lightweight official Python 3.14 base runtime image 
-FROM python:3.14-slim AS builder 
+FROM python:3.14-slim AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpcre2-8-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Step 2: Establish system operational paths inside the container 
 WORKDIR /build 
@@ -22,6 +26,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --user -r requirements.txt 
 
 FROM python:3.14-slim AS runner
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpcre2-8-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
