@@ -21,5 +21,14 @@ resource "azurerm_role_assignment" "aca_pull" {
   principal_id          = azurerm_user_assigned_identity.aca.principal_id
 }
 
+# Lets CI push images to the shared registry. AcrPush also includes pull and the read needed to check
+# that a tag exists, so no separate pull grant is needed. The registry lives in another resource group,
+# so this is a role assigned at the registry itself, not at poc-eai-aca-rg.
+resource "azurerm_role_assignment" "gha_acr_push" {
+  scope                = data.azurerm_container_registry.shared.id
+  role_definition_name = "AcrPush"
+  principal_id         = data.azuread_service_principal.gha_deploy.object_id
+}
+
 output "acr_id"           { value = data.azurerm_container_registry.shared.id }
 output "acr_login_server" { value = data.azurerm_container_registry.shared.login_server }
