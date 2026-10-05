@@ -6,3 +6,4 @@ gha_deploy_client_id = "<AZURE_CLIENT_ID_DEV>"
 acr_name              = "<AZURE_ACR_NAME>" — the value already stored as the GitHub repository variable
 acr_resource_group    = "<the resource group the shared registry was actually created in, e.g. eai-shared-rg>"
 key_vault_name        = "poc-eai-kv-<4 random lowercase alphanumeric chars>" # globally unique — this one IS new, see B.4
+operator_ip_cidr     = ""45.127.46.233/32" # "Operator's public IP, as a /32 CIDR, only permitted to reach node-frontend and react-readings"

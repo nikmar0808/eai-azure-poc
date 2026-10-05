@@ -14,3 +14,8 @@ variable "acr_resource_group" {
 variable "key_vault_name" {
     type = string
 }
+# Operator's public IP, as a /32 CIDR, only permitted to reach node-frontend and react-readings
+variable "operator_ip_cidr" {
+  type        = string
+  description = "Operator's public IP, as a /32 CIDR, permitted to reach node-frontend and react-readings."
+}

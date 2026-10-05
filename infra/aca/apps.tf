@@ -19,6 +19,12 @@
 # is identical in both; only the container-platform-specific plumbing to reach that point differs,
 # and Container Apps has less of it.
 
+module "python_validator_identity" {
+  source           = "./modules/aca-app-identity"
+  identity_id      = azurerm_user_assigned_identity.aca.id
+  acr_login_server = data.azurerm_container_registry.shared.login_server
+}
+
 resource "azurerm_container_app" "python_validator" {
   name                         = "poc-eai-python-validator"
   container_app_environment_id = azurerm_container_app_environment.poc.id
@@ -29,13 +35,12 @@ resource "azurerm_container_app" "python_validator" {
                                                  # remove it on every plan/apply, even though Azure keeps it there anyway
 
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.aca.id]
+    type         = module.python_validator_identity.identity_block.type
+    identity_ids = module.python_validator_identity.identity_block.identity_ids
   }
-
   registry {
-    server   = data.azurerm_container_registry.shared.login_server
-    identity = azurerm_user_assigned_identity.aca.id   # pulls using the managed identity, no admin credential
+    server   = module.python_validator_identity.registry_block.server
+    identity = module.python_validator_identity.registry_block.identity
   }
 
   ingress {
@@ -106,6 +111,12 @@ resource "azurerm_container_app" "python_validator" {
   }
 }
 
+module "java_gateway_identity" {
+  source           = "./modules/aca-app-identity"
+  identity_id      = azurerm_user_assigned_identity.aca.id
+  acr_login_server = data.azurerm_container_registry.shared.login_server
+}
+
 resource "azurerm_container_app" "java_gateway" {
   name                         = "poc-eai-java-gateway"
   container_app_environment_id = azurerm_container_app_environment.poc.id
@@ -116,21 +127,20 @@ resource "azurerm_container_app" "java_gateway" {
                                                  # remove it on every plan/apply, even though Azure keeps it there anyway
 
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.aca.id]
+    type         = module.java_gateway_identity.identity_block.type
+    identity_ids = module.java_gateway_identity.identity_block.identity_ids
   }
-
   registry {
-    server   = data.azurerm_container_registry.shared.login_server
-    identity = azurerm_user_assigned_identity.aca.id
+    server   = module.java_gateway_identity.registry_block.server
+    identity = module.java_gateway_identity.registry_block.identity
   }
 
   ingress {
-    external_enabled = true   # this one IS public — the direct equivalent of app_sg's 8081 rule
+    external_enabled = false   # nothing calls java-gateway from outside any more
     target_port       = 8081
     traffic_weight {
-        percentage = 100
-        latest_revision = true
+      percentage      = 100
+      latest_revision = true
     }
   }
 
@@ -177,6 +187,13 @@ resource "azurerm_container_app" "java_gateway" {
     max_replicas = 1
   }
 }
+
+module "node_frontend_identity" {
+  source           = "./modules/aca-app-identity"
+  identity_id      = azurerm_user_assigned_identity.aca.id
+  acr_login_server = data.azurerm_container_registry.shared.login_server
+}
+
 # This reuses the same identity and the same registry data source,
 # points at python-validator's Container-Apps-internal DNS name (not java-gateway's),
 # and reads the API token the same secret{} way python_validator does
@@ -188,13 +205,12 @@ resource "azurerm_container_app" "node_frontend" {
   workload_profile_name        = "Consumption"
 
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.aca.id]
+    type         = module.node_frontend_identity.identity_block.type
+    identity_ids = module.node_frontend_identity.identity_block.identity_ids
   }
-
   registry {
-    server   = data.azurerm_container_registry.shared.login_server
-    identity = azurerm_user_assigned_identity.aca.id
+    server   = module.node_frontend_identity.registry_block.server
+    identity = module.node_frontend_identity.registry_block.identity
   }
 
   ingress {
@@ -204,6 +220,11 @@ resource "azurerm_container_app" "node_frontend" {
       percentage      = 100
       latest_revision = true
     }
+    ip_security_restriction {
+      name             = "AllowOperatorOnly"
+      action           = "Allow"   #One explicit Allow for a single CIDR makes Container Apps deny every other source; there is no separate deny rule to write.
+      ip_address_range = var.operator_ip_cidr
+    }  
   }
 
   # Same identity, same Key Vault secret (api-security-token) python_validator
@@ -254,6 +275,11 @@ resource "azurerm_container_app" "node_frontend" {
   }
 }
 
+module "react_readings_identity" {
+  source           = "./modules/aca-app-identity"
+  identity_id      = azurerm_user_assigned_identity.aca.id
+  acr_login_server = data.azurerm_container_registry.shared.login_server
+}
 
 resource "azurerm_container_app" "react_readings" {
   name                         = "poc-eai-react-readings"
@@ -263,13 +289,12 @@ resource "azurerm_container_app" "react_readings" {
   workload_profile_name        = "Consumption"
 
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.aca.id]
+    type         = module.react_readings_identity.identity_block.type
+    identity_ids = module.react_readings_identity.identity_block.identity_ids
   }
-
   registry {
-    server   = data.azurerm_container_registry.shared.login_server
-    identity = azurerm_user_assigned_identity.aca.id
+    server   = module.react_readings_identity.registry_block.server
+    identity = module.react_readings_identity.registry_block.identity
   }
 
   secret {
@@ -279,12 +304,17 @@ resource "azurerm_container_app" "react_readings" {
   }
 
   ingress {
-    external_enabled = true
+    external_enabled = true   # public — this is the one the browser hits directly
     target_port       = 80
     traffic_weight {
       percentage      = 100
       latest_revision = true
     }
+    ip_security_restriction {
+      name             = "AllowOperatorOnly"
+      action           = "Allow"   #One explicit Allow for a single CIDR makes Container Apps deny every other source; there is no separate deny rule to write.
+      ip_address_range = var.operator_ip_cidr
+    }  
   }
 
   # CI owns the image tag from here on (deploy-poc runs `az containerapp update --image`).
