@@ -1,4 +1,4 @@
-# Enterprise Integration Pipeline — Spring Boot, FastAPI, Node, React, PostgreSQL, Docker, GitHub Actions, Terraform, Azure Container Apps
+# DevOps, CI Pipeline — Java, Spring Boot, Python, FastAPI, Nodejs, React, TypeScript, Vite, PostgreSQL, Docker, GitHub Actions, Trivy, Trufflehog, Gitleaks, Terraform, Azure Container Apps
 
 > **Status: work in progress.** This repository is a hands-on proof of concept (POC) built while the author brings a long enterprise-integration background up to date with current cloud-native practice. The application layer and the Azure delivery pipeline work end to end; testing depth, API security, the data layer and Kubernetes are planned next (see [Status and roadmap](#status-and-roadmap)). Limitations are stated openly in [Known limitations](#known-limitations).
 
