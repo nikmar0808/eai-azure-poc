@@ -11,6 +11,7 @@ RUN npm run build
 # no node_modules. Meaningfully smaller and a smaller attack surface than
 # shipping the build tooling itself.
 FROM nginx:1.27-alpine
+RUN apk update && apk upgrade
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 EXPOSE 80
