@@ -75,19 +75,33 @@ jobs:
     permissions: { contents: read, security-events: write }
     steps:
       - uses: actions/checkout@v4
+      # Step 1: results for the Security tab. Never fails the job (exit-code 0).
+      # SARIF is a machine format: it does NOT print findings in the log, which is why the gate is a second step.
       - uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
+          scanners: vuln                  # vulnerabilities only; secrets are scanned by secret-scan, licences are not a gate
           severity: CRITICAL,HIGH
           ignore-unfixed: true            # only findings that have a fixed version are actionable
           trivyignores: .trivyignore      # accepted findings, each with a reason and an expiry date
-          exit-code: 1
+          exit-code: 0
           format: sarif
           output: trivy-fs-results.sarif
       - if: always() && hashFiles('trivy-fs-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-fs-results.sarif }
+      # Step 2: the gate. Same scan, readable table in the log, fails the job on any remaining finding.
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: 1
+          format: table
 
   java-build-test:
     needs: [secret-scan, dependency-scan]
