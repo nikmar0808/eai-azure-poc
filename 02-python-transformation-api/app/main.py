@@ -1,3 +1,8 @@
+import os
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    configure_azure_monitor()
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
