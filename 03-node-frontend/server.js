@@ -1,5 +1,21 @@
 require('dotenv').config();
+
+// Tracing is started before express is loaded, and only when a connection string is supplied.
+if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) {
+  const { useAzureMonitor } = require('@azure/monitor-opentelemetry');
+  useAzureMonitor({
+    azureMonitorExporterOptions: {
+      connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING,
+    },
+  });
+  // Node's built-in fetch is traced by a separate instrumentation.
+  const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+  const { UndiciInstrumentation } = require('@opentelemetry/instrumentation-undici');
+  registerInstrumentations({ instrumentations: [new UndiciInstrumentation()] });
+}
+
 const express = require('express');
+
 const path = require('path');
 
 const app = express();

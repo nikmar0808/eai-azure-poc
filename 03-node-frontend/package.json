@@ -6,11 +6,13 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@azure/monitor-opentelemetry": "^1.20.1",
+    "@opentelemetry/instrumentation": "^0.223.0",
+    "@opentelemetry/instrumentation-undici": "^0.33.0",
     "dotenv": "^18.0.4",
     "express": "^5.2.1"
   },
   "description": "",
-  "devDependencies": {},
   "keywords": [],
   "author": "",
   "license": "ISC",
