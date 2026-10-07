@@ -2,6 +2,8 @@ import os
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
     configure_azure_monitor()
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    SQLAlchemyInstrumentor().instrument()
 
 import logging
 from contextlib import asynccontextmanager
@@ -22,10 +24,18 @@ from app.database.models import Base
 Base.metadata.create_all(bind=engine)
 
 # Configure unified structured logging for the application lifecycle
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
-)
+LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
+LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(LOG_LEVEL)
+# basicConfig() silently does nothing when the root logger already has a handler, and the tracing
+# library may add one first. A console handler is therefore added explicitly if none exists.
+if not any(type(h) is logging.StreamHandler for h in root_logger.handlers):
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root_logger.addHandler(console_handler)
+
 logger = logging.getLogger(__name__)
 
 # --- LIFESPAN EVENT HANDLER ---
