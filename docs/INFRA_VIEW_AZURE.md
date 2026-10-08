@@ -67,6 +67,7 @@ flowchart TB
     ACR["Shared ACR"]
     MI["Managed identity\npoc-eai-aca-id"]
     LAW["Log Analytics"]
+    AI["Application Insights\noptional, created by CLI"]
 
     Internet --> OperatorIP
     OperatorIP -->|"ingress allow-list"| Node
@@ -78,6 +79,8 @@ flowchart TB
     MI -->|"AcrPull"| ACR
     MI -->|"Key Vault Secrets User"| KV
     ENV --> LAW
+    ENV -.->|"traces, when enabled"| AI
+    AI --> LAW
 ```
 
 ## Important facts about this topology
@@ -91,7 +94,7 @@ flowchart TB
 
 | App (resource name) | Terraform resource | Ingress | Port | CPU / memory | Replicas | Notable settings |
 |---|---|---|---|---|---|---|
-| `poc-eai-python-validator` | `azurerm_container_app.python_validator` | Internal | 8082 | 0.5 / 1 Gi | 0–1 | `DATABASE_URL` and `API_SECURITY_TOKEN` from Key Vault secret references |
+| `poc-eai-python-validator` | `azurerm_container_app.python_validator` | Internal | 8082 | 0.5 / 1 Gi | 0–1 | `DATABASE_URL` and `API_SECURITY_TOKEN` from Key Vault secret references; optional tracing variables (`APPLICATIONINSIGHTS_CONNECTION_STRING`, `OTEL_SERVICE_NAME`) set by hand |
 | `poc-eai-java-gateway` | `azurerm_container_app.java_gateway` | Internal | 8081 | 0.5 / 1 Gi | 0–1 | Python service address by app name; downstream token from Key Vault |
 | `poc-eai-node-frontend` | `azurerm_container_app.node_frontend` | External, one allowed address | 3000 | 0.25 / 0.5 Gi | 0–1 | Python service address by app name; token from Key Vault |
 | `poc-eai-react-readings` | `azurerm_container_app.react_readings` | External, one allowed address | 80 | 0.25 / 0.5 Gi | 0–1 | Nginx reverse proxy to the Python service; token from Key Vault |
@@ -103,7 +106,7 @@ flowchart TB
 |---|---|---|---|
 | Resource group (application) | `azurerm_resource_group.poc_aca` | `poc-eai-aca-rg` | `infra/aca/main.tf` |
 | User-assigned managed identity | `azurerm_user_assigned_identity.aca` | `poc-eai-aca-id` | `infra/aca/identity.tf` |
-| Log Analytics workspace | `azurerm_log_analytics_workspace.poc` | `poc-eai-law` (pay-as-you-go SKU, 30-day retention, 1 GB per day ingestion cap) | `infra/aca/environment.tf` |
+| Log Analytics workspace | `azurerm_log_analytics_workspace.poc` | `poc-eai-law` (pay-as-you-go SKU, 30-day retention, 1 GB per day ingestion cap, shared by console logs and Application Insights telemetry) | `infra/aca/environment.tf` |
 | Container Apps environment | `azurerm_container_app_environment.poc` | `poc-eai-aca-env` (Consumption workload profile) | `infra/aca/environment.tf` |
 | Key Vault | `azurerm_key_vault.poc` | `poc-eai-kv-<suffix>` (role-based authorisation, soft-delete 7 days, purge protection off) | `infra/aca/key-vault.tf` |
 | Key Vault secrets | `azurerm_key_vault_secret` ×3 | `database-password`, `api-security-token`, `database-url` | `infra/aca/key-vault.tf` |
@@ -113,6 +116,7 @@ flowchart TB
 | Resource group (shared) | `azurerm_resource_group.shared` | `eai-shared-rg` | `infra/shared/resource-group.tf` |
 | Alert rules and action group | created with the Azure CLI | restart-count alerts, an error-rate alert, an e-mail action group | **not in Terraform** |
 | Dashboard | created in the portal | `poc-eai-window` | **not in Terraform** |
+| Application Insights component (optional) | created with the Azure CLI | workspace-based, writing into `poc-eai-law` | **not in Terraform** |
 
 ---
 
@@ -380,7 +384,7 @@ The `java-gateway` app is deployed and healthy but is called by neither path. It
 5. **The Java gateway is deployed but unused by the frontends.** Nothing calls it, which is why its ingress is internal-only.
 6. **The two public apps are not authenticated.** They are protected by an address allow-list, and the React app's Nginx injects the shared token into every proxied request, so the allow-list is the only barrier. That is why it matters and why a production system adds a gateway with token validation in front.
 7. **Terraform and the pipeline own different things.** Terraform owns the apps' shape; the pipeline owns which image tag runs. Terraform's plan reports no change after a deployment because it has been told to ignore the image field.
-8. **Alerts and the dashboard are outside Terraform.** They were created with the CLI and the portal, so a destroy does not remove them. They must be deleted first, or the resource group cannot be destroyed.
+8. **Alerts, the dashboard and Application Insights are outside Terraform.** They were created with the CLI and the portal, so a destroy does not remove them. They must be deleted first, or the resource group cannot be destroyed. The tracing environment variables set by hand on running apps are outside Terraform too: a later `terraform apply` would remove them, which is why none is run while tracing is in use.
 9. **The shared registry has a separate lifecycle.** Destroying the application stack leaves the registry, and its images, in place until the shared stack is destroyed deliberately.
 10. **Data sources and credentials are Terraform-side constructs, not deployed resources.** They should not be read as inventory entries alongside the role assignments they help build.
 11. **The environment is temporary.** It runs on a free-tier credit and is destroyed on a planned date. Everything is rebuildable from the repository and Terraform.
