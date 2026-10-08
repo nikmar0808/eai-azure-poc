@@ -35,6 +35,7 @@ This implementation runs the Enterprise Integration application on **Azure Conta
 | The React frontend is served by **Nginx, which proxies `/api/*` and injects the token**. | The browser never holds a secret: Nginx is the trust boundary, as the Node frontend is for the write path. Nginx is a purpose-built static server and reverse proxy, and it uses the same environment-variable substitution mechanism for the token as for the upstream address. |
 | The two public endpoints are protected by an **ingress address allow-list**, not by application authentication. | A stand-in for a gateway with token validation. Because the Nginx proxy adds the shared token to every request, the allow-list is the only barrier on the read path; a production system puts a gateway or web application firewall in front, with OAuth2 or JWT validation on the route. |
 | **Secret scanning combines TruffleHog and Gitleaks**, plus GitHub push protection. | A scanner that reports only credentials it can verify as live cannot flag home-made tokens or passwords, because there is no issuer to check them against. Gitleaks, with a project-specific rule held in a repository secret, covers those. |
+| **Tracing is opt-in per app, through an environment variable, and its Azure resource is created outside Terraform.** | Without the variable an app sends nothing, so local runs, tests and CI are unaffected. The Application Insights component is workspace-based, so its telemetry lands in the same Log Analytics workspace as the console logs and one query surface covers both. It is created with the CLI, like the alerts, because the environment is temporary; a permanent deployment defines it in Terraform and keeps its connection string in Key Vault. |
 
 ---
 
@@ -139,7 +140,11 @@ The subscription allows three Standard public IPs. The virtual-machine design co
 
 An edge layer in front of the React frontend was attempted with Azure Front Door Standard and refused by the platform: Azure forbids Front Door resources on free-trial and student accounts, a restriction tied to the subscription type rather than to quota, region or SKU. Classic Azure CDN cannot be used as a fallback, because Microsoft stopped allowing new classic profiles in 2025. No CDN or edge product is currently available to this subscription, so the frontend is reached directly at its Container Apps address, with no edge caching, no global points of presence and no web application firewall. [ADR-008](adr/ADR-008-react-frontend-and-edge-cdn.md) records the original reasoning and the amendment. A paid subscription removes the restriction.
 
-### 4.6 The environment is temporary
+### 4.6 API Management cannot front the internal apps
+
+An API gateway with token validation in front of the apps was evaluated. The Consumption tier of Azure API Management was created successfully on this subscription, but it cannot be placed in a virtual network, and every backend except the two frontends has internal-only ingress, so the gateway cannot reach them. The one remaining candidate, the Java gateway, would have had to be made externally reachable and restricted to the gateway's outbound address. The service reported no outbound address (the field was empty), so there was nothing stable to allow-list, and the alternative, an unrestricted public endpoint, would undo the ingress hardening. The work was therefore not done. A paid subscription uses a tier that supports network integration, which places the gateway in the same private network as the backends so that the gateway is the only public entry point.
+
+### 4.7 The environment is temporary
 
 The subscription runs on a time-limited credit. The environment is therefore treated as disposable: everything it contains is defined in Terraform and the pipeline, and it can be destroyed and rebuilt from the repository. Loss of the subscription costs nothing but time.
 
@@ -258,6 +263,48 @@ The table below is the single point of reference for the identifiers used across
 | GitHub Environment | literal | `poc` |
 | GitHub repository variables | `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `ACR_NAME`, `AZURE_CLIENT_ID` | — |
 | GitHub repository secret | `GITLEAKS_PROJECT_REGEX` | — |
+
+---
+
+## 10. Observability and Operations
+
+### 10.1 What is collected, and where it is read
+
+| Signal | Where it lands | Notes |
+|---|---|---|
+| Console output of every app | Log Analytics table `ContainerAppConsoleLogs_CL` | Ingested **one line per row**, so a multi-line traceback is several rows. A complete traceback is rebuilt by filtering one app and a narrow time window and ordering by time. |
+| Platform events (probe failures, restarts, image pulls, revision provisioning) | `ContainerAppSystemLogs_CL` | The only place an explanation appears when a container never starts and so prints nothing. |
+| Request and dependency traces from the Python service (optional) | `AppRequests`, `AppDependencies`, `AppExceptions` in the same workspace | Present only when tracing is switched on (Section 10.2). |
+
+All of it shares the workspace's one-gigabyte daily ingestion cap. When the cap is reached, ingestion stops for every source at once.
+
+### 10.2 Tracing
+
+The Python service can send OpenTelemetry traces to Application Insights. It is switched on by setting `APPLICATIONINSIGHTS_CONNECTION_STRING` on the running app; when the variable is absent the service starts normally and sends nothing. The variable is set from the CLI, not from Terraform, so a later `terraform apply` would remove it; this is a deliberate, documented drift of the temporary environment, and a permanent deployment would define it in Terraform and keep the connection string in Key Vault.
+
+### 10.3 Changing a running app safely: revisions and canary
+
+Every change to an app's image, environment variables or resources creates a new **revision**, an immutable snapshot with a name such as `poc-eai-python-validator--0000007`. The apps run in **single-revision mode**: the new revision replaces the old one once healthy. **Multiple-revision mode** keeps several revisions active and sends each a configured percentage of traffic, which allows a canary release and a near-instant rollback by moving the weights.
+
+A canary across two revisions of the Python service was run and rolled back. Three points from that exercise are worth recording:
+
+- **Traffic follows the latest revision by default**, so all traffic is pinned to the stable revision before a canary revision is created; otherwise the canary could receive everything the moment it exists.
+- **The deployment job in `ci.yml` must not run while an app is in multiple-revision mode.** It updates the image, which in that mode creates another revision instead of replacing the current one.
+- **Returning to single-revision mode keeps the latest revision.** A final revision with the stable configuration is created first, so the app does not end up running the canary's configuration.
+
+### 10.4 Health checks and what they do not prove
+
+The Python service's `/health` runs `SELECT 1` against the database. It confirms the database is reachable; it does not confirm that the tables exist. The service creates its tables only when it starts, and the database container has ephemeral storage (Section 8.1), so a database restart leaves an empty database that the health check still reports as up. The Java gateway's `/health` probes the Python service's root route, so it inherits the same limit. A health check that exercises a real table is the production alternative.
+
+### 10.5 Database recovery
+
+The deployed PostgreSQL container has no backups. Recovery was therefore rehearsed on a throwaway Azure Database for PostgreSQL Flexible Server in a separate resource group: rows were deleted by mistake, and a point-in-time restore to a moment before the mistake was requested. Facts established by the exercise:
+
+- A restore always creates a **new server**; the original is not rewound.
+- The restored server did not inherit the original's firewall rule, so a rule had to be added before connecting.
+- Recovery is completed either by pointing the application at the restored server or by copying the missing rows back; both are deliberate decisions, not part of the restore.
+
+A production deployment uses a managed server for the real database, with geo-redundant backup, a retention period matched to how late a mistake is typically noticed, and a restore test on a schedule with the measured restore time written into a runbook.
 
 ---
 

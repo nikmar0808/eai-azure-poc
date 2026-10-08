@@ -11,6 +11,7 @@ The project implements a small smart-meter ingestion flow. A browser form (Node.
 - **Security remediation, not just scanning:** the vulnerabilities and secrets that the scanners reported were triaged and fixed, and the gates were then proved to block (see [Vulnerability and secret remediation](#vulnerability-and-secret-remediation)).
 - Infrastructure as code with Terraform on Azure, including identity bootstrap, a shared registry and a Container Apps stack, with remote state in HCP Terraform.
 - Security practice: no stored cloud credentials, managed identities, Key Vault secret references, internal-only backends, and scan gates that fail on actionable findings.
+- Observability and operations: Log Analytics queries over console and platform logs, optional OpenTelemetry tracing to Application Insights, a rehearsed revision-based canary rollout and rollback, and a rehearsed database point-in-time restore (see [Observability and operations](#observability-and-operations)).
 
 ## What this project does
 
@@ -154,6 +155,7 @@ A single environment, deployed on an Azure free-tier subscription, is provisione
 | User-assigned managed identity | Image pull and Key Vault access for the Container Apps |
 | Microsoft Entra ID | Workload identity federation for GitHub Actions (no stored credentials) |
 | Azure Monitor and Log Analytics | Log collection, a dashboard, and alert rules (restart count, error rate) |
+| Application Insights | Optional distributed tracing for the Python service. Workspace-based, so it writes into the same Log Analytics workspace. Created with the CLI, not Terraform |
 | HCP Terraform | Terraform state storage (local execution mode) |
 
 After a deployment, the two public addresses come from the Terraform outputs; both are restricted to an allow-listed operator address:
@@ -184,6 +186,14 @@ Terraform roots in use, each with its own state:
 
 State is stored in HCP Terraform under local execution mode, so every `terraform apply` runs from the operator's machine with an interactive Azure CLI session. See [`docs/INFRA_VIEW_AZURE.md`](docs/INFRA_VIEW_AZURE.md) for a resource-by-resource map.
 
+## Observability and operations
+
+- **Logs.** Console and platform logs from all five apps land in one Log Analytics workspace and are queried with KQL. Starter queries are in [`docs/DEPLOYMENT_AZURE.md`](docs/DEPLOYMENT_AZURE.md), Troubleshooting Reference.
+- **Tracing (optional).** The Python service can send OpenTelemetry traces to Application Insights. It is switched on by setting the `APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable; without it, the service sends nothing and behaves as before. The Application Insights resource is created with the Azure CLI, outside Terraform (see Deployment, Part 9).
+- **Changing a running app safely.** Apps normally run in single-revision mode. A 90/10 canary across two revisions of the Python service was run, measured from telemetry, rolled back by moving traffic weights, and returned to single-revision mode. The traps found along the way are recorded in [`docs/ARCHITECTURE_AZURE.md`](docs/ARCHITECTURE_AZURE.md), Section 10.
+- **Database recovery.** The deployed database is an ephemeral container with no backups. Point-in-time restore was therefore rehearsed on a throwaway Azure Database for PostgreSQL Flexible Server outside the deployed stack: rows were deleted by mistake, a restore to a moment before the mistake created a new server, and the restored data was checked against the original.
+- **Not done.** API Management could not front the internal apps on this subscription (see [`docs/ARCHITECTURE_AZURE.md`](docs/ARCHITECTURE_AZURE.md), Section 4.6).
+
 ## Known limitations
 
 These are deliberate, documented trade-offs of a free-tier POC, not hidden gaps.
@@ -191,14 +201,15 @@ These are deliberate, documented trade-offs of a free-tier POC, not hidden gaps.
 | Limitation | Why, and the production alternative |
 |---|---|
 | PostgreSQL runs as a container with **ephemeral storage** | Azure Files over SMB cannot support the permission changes PostgreSQL's initialisation makes, and the supported alternatives cost more than the POC window justifies. Production uses a managed server (Azure Database for PostgreSQL) behind private networking. |
-| The public endpoints have **no application-level authentication**; they are IP allow-listed | A stand-in for a gateway with token validation. Production puts an API gateway or WAF in front, with OAuth2/JWT on the route. |
+| The public endpoints have **no application-level authentication**; they are IP allow-listed | A stand-in for a gateway with token validation. Production puts an API gateway or WAF in front, with OAuth2/JWT on the route. An API Management attempt was stopped because its Consumption tier cannot reach internal-only apps ([`docs/ARCHITECTURE_AZURE.md`](docs/ARCHITECTURE_AZURE.md), Section 4.6). |
+| The tracing settings are applied by hand, so they are **not in Terraform** | A later `terraform apply` would remove them. A permanent deployment defines the Application Insights resource in Terraform and keeps its connection string in Key Vault, like the other secrets. |
 | Azure Front Door could not be created | Azure forbids it on free-trial subscriptions; recorded in [ADR-008](docs/adr/ADR-008-react-frontend-and-edge-cdn.md). Production would put an edge or CDN layer in front of the React screen. |
 | The Java service has **no unit tests**; the Node service has no tests | The Java build passes trivially because `src/test` is empty. Testing is the next planned stage. |
-| One environment, one reviewer | Approval is an audit record, not a second pair of eyes. A team uses one environment per stage and a different reviewer. The [three-environment repository](https://github.com/<GITHUB_ORG>/<THREE_ENV_REPO_NAME>) shows the multi-stage arrangement. |
+| One environment, one reviewer | Approval is an audit record, not a second pair of eyes. A team uses one environment per stage and a different reviewer. The [three-environment repository](https://github.com/nikmar0808/enterprise-integration-azure) shows the multi-stage arrangement. |
 
 ## Status and roadmap
 
-**Done.** Local and Azure deployment of all services; the CI/CD pipeline described above; scan and secret remediation with proved gates; hardening of ingress, secrets handling and identities; and architecture decisions (ADR-001, 002, 003, 008 and 009).
+**Done.** Local and Azure deployment of all services; the CI/CD pipeline described above; scan and secret remediation with proved gates; hardening of ingress, secrets handling and identities; optional tracing to Application Insights with Log Analytics queries; a rehearsed canary rollout and point-in-time restore; and architecture decisions (ADR-001, 002, 003, 008 and 009).
 
 **Next, in order.**
 
@@ -206,9 +217,9 @@ These are deliberate, documented trade-offs of a free-tier POC, not hidden gaps.
 2. Data layer: PostgreSQL performance work, migrations with Alembic, idempotent ingestion, a MongoDB audit store.
 3. Frontend depth: TypeScript, Jest and React Testing Library.
 4. Containers and Kubernetes on a local cluster, Helm, delivery patterns.
-5. Observability and operations; cloud, IaC and security patterns on a second cloud.
+5. Deeper observability with free, self-hosted tooling; cloud, IaC and security patterns on a second cloud.
 
-**Azure-only extensions under consideration** (these need a live subscription): an API gateway with token validation, a private-network managed PostgreSQL, Application Insights tracing, and canary traffic splitting.
+**Azure-only extensions not completed** (these need a live subscription): an API gateway with token validation (blocked on the tier available here, see [Known limitations](#known-limitations)) and a private-network managed PostgreSQL (point-in-time restore was rehearsed on a throwaway public-access server instead, because the Container Apps environment has no virtual network).
 
 ## Documentation
 

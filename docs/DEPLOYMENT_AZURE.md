@@ -369,7 +369,7 @@ az containerapp revision list --name poc-eai-python-validator --resource-group p
 
 ## Part 9 — Monitoring
 
-Alert rules and the dashboard are created with the Azure CLI and the portal and are not managed by Terraform. Delete them before destroying the stack (Part 11). Confirm telemetry is flowing first. The workspace ID is the GUID shown on the Log Analytics workspace `poc-eai-law`:
+Alert rules, the dashboard and the optional Application Insights component are created with the Azure CLI and the portal and are not managed by Terraform. Delete them before destroying the stack (Part 11). Confirm telemetry is flowing first. The workspace ID is the GUID shown on the Log Analytics workspace `poc-eai-law`:
 
 ```powershell
 $workspaceId = az monitor log-analytics workspace show --resource-group poc-eai-aca-rg --workspace-name poc-eai-law --query customerId -o tsv
@@ -421,7 +421,27 @@ ContainerAppConsoleLogs_CL
 | render timechart
 ```
 
-Log Analytics is configured with a one-gigabyte daily ingestion cap as a cost safety net; if ingestion approaches it, raise the cap deliberately in Terraform rather than removing it.
+**Application Insights tracing (optional).** The Python service sends traces only when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set on the running app. The component is workspace-based, so its data lands in `poc-eai-law` beside the console logs.
+
+```powershell
+$workspaceResourceId = az monitor log-analytics workspace show --resource-group poc-eai-aca-rg --workspace-name poc-eai-law --query id -o tsv
+az monitor app-insights component create --app poc-eai-appi --location <AZURE_LOCATION> --resource-group poc-eai-aca-rg --workspace $workspaceResourceId
+$ai = az monitor app-insights component show --app poc-eai-appi --resource-group poc-eai-aca-rg --query connectionString -o tsv
+az containerapp update --name poc-eai-python-validator --resource-group poc-eai-aca-rg --set-env-vars "APPLICATIONINSIGHTS_CONNECTION_STRING=$ai" "OTEL_SERVICE_NAME=python-validator"
+```
+
+If the CLI offers to install the `application-insights` extension, accept. After some requests and three to five minutes for ingestion, this query in `poc-eai-law` Logs should return rows with `AppRoleName` of `python-validator`:
+
+```kusto
+AppRequests
+| where TimeGenerated > ago(30m)
+| project TimeGenerated, AppRoleName, Name, ResultCode, DurationMs, OperationId
+| order by TimeGenerated desc
+```
+
+The variables are set by hand, so Terraform does not know about them: a later `terraform apply` in `infra/aca` removes them. A permanent deployment defines the component in Terraform and keeps the connection string in Key Vault.
+
+Log Analytics is configured with a one-gigabyte daily ingestion cap as a cost safety net, shared by the console logs and any Application Insights telemetry; if ingestion approaches it, raise the cap deliberately in Terraform rather than removing it.
 
 ---
 
