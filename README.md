@@ -1,6 +1,7 @@
 # DevOps, CI Pipeline — Java, Spring Boot, Python, FastAPI, Nodejs, React, TypeScript, Vite, PostgreSQL, Docker, GitHub Actions, Trivy, Trufflehog, Gitleaks, Terraform, Azure Container Apps
 
 > **Status: work in progress.** This repository is a hands-on proof of concept (POC) built while the author brings a long enterprise-integration background up to date with current cloud-native practice. The application layer and the Azure delivery pipeline work end to end; testing depth, API security, the data layer and Kubernetes are planned next (see [Status and roadmap](#status-and-roadmap)). Limitations are stated openly in [Known limitations](#known-limitations).
+> **Update, <teardown date>:** the Azure environment described here has been torn down and the repository is frozen at tag [`v1.0.0`](https://github.com/nikmar0808/eai-azure-poc/releases/tag/v1.0.0). Backend testing, API security and the data layer continue in [`eai-backend-poc`](https://github.com/nikmar0808/eai-backend-poc).
 
 The project implements a small smart-meter ingestion flow. A browser form (Node.js) or a Java Spring Boot gateway receives meter readings, a Python FastAPI service validates and stores them in PostgreSQL, and a React and TypeScript screen reads them back. It is deployed to Microsoft Azure Container Apps through a GitHub Actions pipeline that authenticates with workload identity federation, scans every change, and deploys by immutable image tag after a manual approval.
 
